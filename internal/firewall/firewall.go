@@ -87,7 +87,7 @@ func buildRules(cfg *config.Config) []rule {
 			restricted = append(restricted, portProto{cfg.Traefik.DashboardPort, "tcp", "Traefik dashboard"})
 		}
 	}
-	restricted = append(restricted, portProto{80, "tcp", "CasaOS"})
+	restricted = append(restricted, portProto{81, "tcp", "CasaOS"})
 
 	for _, source := range []string{cfg.WireGuard.Subnet, "127.0.0.1/32"} {
 		for _, p := range restricted {

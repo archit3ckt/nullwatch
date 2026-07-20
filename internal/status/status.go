@@ -34,7 +34,7 @@ func Links(cfg *config.Config) []Link {
 	if cfg.Traefik != nil && cfg.Traefik.Enabled && cfg.Traefik.DashboardEnabled {
 		links = append(links, Link{"Traefik dashboard", fmt.Sprintf("http://%s:%d", host, cfg.Traefik.DashboardPort)})
 	}
-	links = append(links, Link{"CasaOS", fmt.Sprintf("http://%s", host)})
+	links = append(links, Link{"CasaOS", fmt.Sprintf("http://%s:81", host)})
 
 	return links
 }

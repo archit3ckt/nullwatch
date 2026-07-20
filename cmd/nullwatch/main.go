@@ -81,17 +81,29 @@ func run() error {
 			if err != nil {
 				return err
 			}
-			if err := applyAndSave(previous, desired); err != nil {
-				return err
+
+			// config.Save happens before docker apply, so even if apply
+			// fails partway through, desired is now the source of truth —
+			// and CasaOS/firewall still run below regardless, since a
+			// partially-applied stack left with no firewall lockdown is
+			// worse than one that's still locked down while broken.
+			applyErr := applyAndSave(previous, desired)
+			if applyErr != nil {
+				fmt.Fprintln(os.Stderr, "warning: apply failed, continuing to CasaOS/firewall so the stack isn't left unprotected:", applyErr)
 			}
+			previous = desired
+
 			if err := casaos.EnsureInstalled(); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
-			if err := firewall.Apply(desired); err != nil {
+			if err := firewall.Apply(previous); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
-			previous = desired
 			printNextSteps(previous)
+
+			if applyErr != nil {
+				return applyErr
+			}
 		case "casaos":
 			if err := casaos.EnsureInstalled(); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)

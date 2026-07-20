@@ -172,7 +172,7 @@ once, the live URLs for each service, right at the top:
 Quick links:
   AdGuard Home:      http://203.0.113.5:3000
   WireGuard admin:   http://203.0.113.5:51821
-  CasaOS:            http://203.0.113.5
+  CasaOS:            http://203.0.113.5:81
 
 What do you want to do?
 > Full setup (AdGuard + WireGuard + Traefik + CasaOS)
