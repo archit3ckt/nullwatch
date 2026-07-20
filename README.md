@@ -90,25 +90,51 @@ runtime — it's deterministic and works the same on every run.
 ## Security posture
 
 The only thing meant to be reachable from the public internet is the
-WireGuard tunnel itself. Everything else — AdGuard's UI, WireGuard's own
-admin panel, Traefik (and anything you proxy through it), and CasaOS — is
-firewalled to the WireGuard client subnet and localhost. Connect to the VPN
-first; that's the only door in.
+WireGuard tunnel itself. Everything else on this host is firewalled to the
+WireGuard client subnet and localhost. Connect to the VPN first; that's the
+only door in — and this applies to whatever is running, not a fixed list of
+services.
 
-This is enforced at the host level via `ufw`, from the menu's "Lock down
-firewall" action (also offered automatically as part of full setup):
+That "whatever is running" part is deliberate: this isn't a per-port
+allowlist naming AdGuard, Traefik, CasaOS, and so on. A hand-maintained port
+list can never keep up with CasaOS's whole reason for existing — one-click
+installs of apps (Nextcloud, Jellyfin, whatever you add next) that each open
+their own ports nullwatch has no way to know about in advance. So instead of
+allowlisting ports, the entire WireGuard subnet is trusted for every port.
+Connected to the VPN, you can reach anything on the box; not connected, nothing but SSH and
+the tunnel itself exists as far as the internet is concerned.
 
-- SSH is allowed from anywhere, always, before anything else is touched —
-  it's the one rule applied first, specifically so a misconfiguration can't
-  lock you out of the box. If you ever can't reach an admin UI, that's what
-  SSH plus `nullwatch` itself are for.
-- The WireGuard UDP port is allowed from anywhere — it has to be, for
-  clients to connect in the first place. WireGuard's protocol silently drops
-  unauthenticated packets rather than responding to them, so it doesn't
-  expand your attack surface the way an open TCP admin port would.
-- Every other managed port (AdGuard, WireGuard's admin UI, Traefik, CasaOS)
-  is only allowed from the WireGuard subnet and `127.0.0.1` — then the
-  default incoming policy is set to deny.
+This needs two separate mechanisms, not just one — from the menu's "Lock
+down firewall" action (also offered automatically as part of full setup):
+
+- **`ufw`**, governing native host processes (sshd, CasaOS's own gateway
+  service): SSH is allowed from anywhere, always, before anything else is
+  touched — it's the one rule applied first, specifically so a
+  misconfiguration can't lock you out of the box. The WireGuard UDP port is
+  allowed from anywhere too, since it has to be for clients to connect in
+  the first place (WireGuard silently drops unauthenticated packets rather
+  than responding to them, so this doesn't expand the attack surface the
+  way an open TCP port would). Every other port is allowed from the
+  WireGuard subnet and `127.0.0.1`, then the default incoming policy is set
+  to deny.
+- **Docker's `DOCKER-USER` iptables chain**, governing every
+  Docker-published port (AdGuard, Traefik, WireGuard's admin UI, and
+  anything installed later via CasaOS). Docker manipulates iptables'
+  nat/FORWARD chains directly to expose published ports, and that happens
+  *before* ufw's INPUT-chain rules ever see the traffic — so `ufw deny` has
+  no effect on a container's published port, full stop. This is a
+  well-documented Docker/ufw interaction, not a nullwatch-specific quirk.
+  `DOCKER-USER` is the chain Docker deliberately leaves empty for exactly
+  this purpose, evaluated before its own permissive rules. nullwatch inserts
+  rules there — scoped to the public network interface, so
+  container-to-container traffic on the internal Docker network is
+  untouched — allowing only the WireGuard subnet and the tunnel port, and
+  dropping everything else.
+
+Skipping the second half and relying on `ufw` alone would leave every
+container's published port reachable from the internet regardless of what
+`ufw status` claims — worth knowing if you ever adapt this for your own
+setup outside of nullwatch.
 
 One consequence: since Traefik's ports are never reachable from the public
 internet, Let's Encrypt's HTTP-01 challenge can't complete (it requires port
