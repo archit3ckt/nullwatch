@@ -4,11 +4,21 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/archit3ckt/nullwatch/internal/config"
 )
+
+// unexpectedStatus builds an error that includes AdGuard's own response
+// body — its API returns a plain-text reason on failure (validation errors,
+// etc.), and swallowing that turned every failure into an unhelpful bare
+// status code.
+func unexpectedStatus(action string, resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return fmt.Errorf("%s: unexpected status %d: %s", action, resp.StatusCode, body)
+}
 
 // Client talks to AdGuard Home's REST API to manage DNS rewrites
 // programmatically, so other modules (Traefik) can register hostnames
@@ -91,7 +101,7 @@ func (c *Client) CompleteInstall(httpPort, dnsPort int) error {
 	case http.StatusOK, http.StatusNotFound:
 		return nil
 	default:
-		return fmt.Errorf("complete install: unexpected status %d", resp.StatusCode)
+		return unexpectedStatus("complete install", resp)
 	}
 }
 
@@ -114,7 +124,7 @@ func (c *Client) existingFilterURLs() (map[string]bool, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("filtering status: unexpected status %d", resp.StatusCode)
+		return nil, unexpectedStatus("filtering status", resp)
 	}
 
 	var status filteringStatus
@@ -161,10 +171,12 @@ func (c *Client) EnsureFilters(blocklists []string) error {
 		if err != nil {
 			return err
 		}
-		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("add filter %s: unexpected status %d", url, resp.StatusCode)
+			err := unexpectedStatus(fmt.Sprintf("add filter %s", url), resp)
+			resp.Body.Close()
+			return err
 		}
+		resp.Body.Close()
 	}
 	return nil
 }
@@ -222,7 +234,7 @@ func (c *Client) ListRewrites() ([]rewriteEntry, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list rewrites: unexpected status %d", resp.StatusCode)
+		return nil, unexpectedStatus("list rewrites", resp)
 	}
 
 	var entries []rewriteEntry
@@ -250,7 +262,7 @@ func (c *Client) addRewrite(domain, answer string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("add rewrite %s -> %s: unexpected status %d", domain, answer, resp.StatusCode)
+		return unexpectedStatus(fmt.Sprintf("add rewrite %s -> %s", domain, answer), resp)
 	}
 	return nil
 }
