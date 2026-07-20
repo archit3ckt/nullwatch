@@ -15,7 +15,7 @@ REPO_URL="https://github.com/archit3ckt/nullwatch.git"
 GO_SDK_DIR="$HOME/go-sdk"
 INSTALL_DIR="/usr/local/bin"
 
-log() { printf '==> %s\n' "$1"; }
+log() { printf '==> %s\n' "$1" >&2; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
