@@ -104,10 +104,20 @@ allowlisting ports, the entire WireGuard subnet is trusted for every port.
 Connected to the VPN, you can reach anything on the box; not connected, nothing but SSH and
 the tunnel itself exists as far as the internet is concerned.
 
-This needs two separate mechanisms, not just one — from the menu's "Lock
-down firewall" action (also offered automatically as part of full setup):
+This talks to `iptables-legacy`/`ip6tables-legacy` directly rather than
+going through `ufw`. `ufw` was the first approach here, but on at least one
+real deployment (Debian trixie, `ufw` 0.36.2) it failed — a bare `"ERROR:
+problem running"`, no further detail, no log output — on *every* new rule
+addition, confirmed by comparing it directly against raw `iptables-legacy`
+performing the identical operation, which worked. Since the layer
+underneath `ufw` is what actually works, this talks to it directly instead
+of fighting `ufw`'s own bug.
 
-- **`ufw`**, governing native host processes (sshd, CasaOS's own gateway
+Two separate chains need rules, covering both IPv4 and IPv6 (Docker
+publishes container ports on both by default) — from the menu's "Lock down
+firewall" action (also offered automatically as part of full setup):
+
+- **`INPUT`**, governing native host processes (sshd, CasaOS's own gateway
   service): SSH is allowed from anywhere, always, before anything else is
   touched — it's the one rule applied first, specifically so a
   misconfiguration can't lock you out of the box. The WireGuard UDP port is
@@ -115,26 +125,28 @@ down firewall" action (also offered automatically as part of full setup):
   the first place (WireGuard silently drops unauthenticated packets rather
   than responding to them, so this doesn't expand the attack surface the
   way an open TCP port would). Every other port is allowed from the
-  WireGuard subnet and `127.0.0.1`, then the default incoming policy is set
-  to deny.
-- **Docker's `DOCKER-USER` iptables chain**, governing every
-  Docker-published port (AdGuard, Traefik, WireGuard's admin UI, and
-  anything installed later via CasaOS). Docker manipulates iptables'
-  nat/FORWARD chains directly to expose published ports, and that happens
-  *before* ufw's INPUT-chain rules ever see the traffic — so `ufw deny` has
-  no effect on a container's published port, full stop. This is a
-  well-documented Docker/ufw interaction, not a nullwatch-specific quirk.
-  `DOCKER-USER` is the chain Docker deliberately leaves empty for exactly
-  this purpose, evaluated before its own permissive rules. nullwatch inserts
-  rules there — scoped to the public network interface, so
-  container-to-container traffic on the internal Docker network is
-  untouched — allowing only the WireGuard subnet and the tunnel port, and
-  dropping everything else.
+  WireGuard subnet and localhost, then the default policy is set to `DROP`.
+- **Docker's `DOCKER-USER` chain**, governing every Docker-published port
+  (AdGuard, Traefik, WireGuard's admin UI, and anything installed later via
+  CasaOS). Docker manipulates iptables' nat/FORWARD chains directly to
+  expose published ports, and that happens *before* `INPUT`-chain rules
+  ever see the traffic — so a restrictive `INPUT` policy has no effect on a
+  container's published port, full stop. This is a well-documented
+  Docker/`ufw` interaction (same root cause, whether you're using `ufw` or
+  plain `iptables`), not a nullwatch-specific quirk. `DOCKER-USER` is the
+  chain Docker deliberately leaves empty for exactly this purpose, evaluated
+  before its own permissive rules. nullwatch inserts rules there — scoped to
+  the public network interface, so container-to-container traffic on the
+  internal Docker network is untouched — allowing only the WireGuard subnet
+  and the tunnel port, and dropping everything else.
 
-Skipping the second half and relying on `ufw` alone would leave every
-container's published port reachable from the internet regardless of what
-`ufw status` claims — worth knowing if you ever adapt this for your own
-setup outside of nullwatch.
+Rules are applied idempotently (checked before adding, so re-running
+doesn't duplicate them) and persisted across reboots via
+`iptables-persistent`/`netfilter-persistent`, installed automatically if
+missing. Skipping the `DOCKER-USER` half and relying on `INPUT`-chain rules
+alone (what `ufw` does by default) would leave every container's published
+port reachable from the internet regardless of what the firewall's status
+output claims — worth knowing if you ever adapt this for your own setup.
 
 One consequence: since Traefik's ports are never reachable from the public
 internet, Let's Encrypt's HTTP-01 challenge can't complete (it requires port
