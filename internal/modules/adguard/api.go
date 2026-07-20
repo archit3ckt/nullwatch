@@ -21,13 +21,22 @@ type Client struct {
 }
 
 // NewClient builds a Client targeting AdGuard's web UI on the local host,
-// where its HTTP port is published.
+// where its HTTP port is published. Redirects are never followed: before
+// first-run setup completes, AdGuard 302s every /control/* route to
+// /install.html, and silently following that could turn a POST into a GET
+// and make a failed call look like it succeeded. Every method here checks
+// status codes explicitly instead.
 func NewClient(cfg *config.AdGuardConfig) *Client {
 	return &Client{
 		baseURL:  fmt.Sprintf("http://127.0.0.1:%d", cfg.HTTPPort),
 		user:     cfg.AdminUser,
 		password: cfg.AdminPassword,
-		http:     &http.Client{Timeout: 5 * time.Second},
+		http: &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
@@ -179,26 +188,21 @@ func (c *Client) Bootstrap(httpPort, dnsPort int, blocklists []string) error {
 
 // WaitReady polls AdGuard's status endpoint until it responds or timeout
 // elapses. AdGuard needs a moment after `up -d` before its API is reachable.
+// WaitReady only confirms the HTTP server is up and listening — not that
+// it's configured. Before first-run setup completes, AdGuard 302s
+// /control/status to /install.html rather than answering it directly, so
+// any response at all (redirect included, since c.http doesn't follow
+// them) counts as proof of life; CompleteInstall handles the rest.
 func (c *Client) WaitReady(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		req, err := http.NewRequest(http.MethodGet, c.baseURL+"/control/status", nil)
-		if err != nil {
-			return err
-		}
-		req.SetBasicAuth(c.user, c.password)
-
-		resp, err := c.http.Do(req)
+		resp, err := c.http.Get(c.baseURL + "/control/status")
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
-			lastErr = fmt.Errorf("status endpoint returned %d", resp.StatusCode)
-		} else {
-			lastErr = err
+			return nil
 		}
+		lastErr = err
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("adguard not ready after %s: %w", timeout, lastErr)
