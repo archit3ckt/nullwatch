@@ -59,3 +59,36 @@ func Apply(previous, desired *config.Config) error {
 
 	return nil
 }
+
+// ApplyOne re-applies a single module — used by the menu's per-module
+// reconfigure actions, so editing e.g. WireGuard's params doesn't touch the
+// other two containers. Still re-runs wiring (cheap and idempotent) since a
+// domain or DNS change elsewhere can affect it.
+func ApplyOne(desired *config.Config, name string) error {
+	wiring.PrepareConfig(desired)
+
+	if err := compose.EnsureNetwork(); err != nil {
+		return fmt.Errorf("ensure docker network: %w", err)
+	}
+
+	m := modules.ByName(name)
+	if m == nil {
+		return fmt.Errorf("unknown module %q", name)
+	}
+
+	fmt.Printf("==> %s: applying\n", m.Name())
+	if err := m.PreApply(desired); err != nil {
+		return fmt.Errorf("%s: preapply: %w", m.Name(), err)
+	}
+	if _, err := m.WriteCompose(desired); err != nil {
+		return fmt.Errorf("%s: write compose: %w", m.Name(), err)
+	}
+	if err := compose.Up(m.Name()); err != nil {
+		return fmt.Errorf("%s: up: %w", m.Name(), err)
+	}
+
+	if err := wiring.RegisterDNS(desired); err != nil {
+		return fmt.Errorf("register DNS wiring: %w", err)
+	}
+	return nil
+}

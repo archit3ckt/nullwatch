@@ -22,9 +22,10 @@ it's set up), and **Traefik** (reverse proxy for whatever you host) — wired
 together automatically, on infrastructure you actually control, with no
 third-party accounts, relays, or telemetry involved.
 
-It's a single static Go binary. No dashboard, no daemon — you run it, answer
-a few prompts, and it exits. Everything it generates (config, compose files)
-is plain text you can read, edit by hand, and version-control yourself.
+It's a single static Go binary. No background service — you run it, pick
+something from a menu, and it exits when you're done. Everything it
+generates (config, compose files) is plain text you can read, edit by hand,
+and version-control yourself.
 
 ## Why
 
@@ -53,12 +54,13 @@ deployed together, since that's the core infrastructure layer this tool
 exists to stand up. What you configure is how they're set up: domain, VPN
 subnet, admin credentials, ports.
 
-Anything beyond that infrastructure layer (Nextcloud, Jellyfin, and every
-other app you'd actually use day to day) is a one-click install away in
-[CasaOS](https://casaos.io)'s app store — nullwatch doesn't duplicate that,
-and isn't a dashboard or day-to-day management UI either. CasaOS
-auto-detects running containers on the same Docker daemon and surfaces them
-on its dashboard with no explicit integration step needed.
+[CasaOS](https://casaos.io) — the dashboard and one-click app store for
+everything else you'd actually use day to day (Nextcloud, Jellyfin, and so
+on) — gets installed alongside the infrastructure layer as part of setup.
+Past installing it, nullwatch doesn't touch it: no managing its config, its
+app store, or its containers. CasaOS auto-detects the containers nullwatch
+runs on the same Docker daemon and surfaces them on its own dashboard with
+no integration step needed.
 
 ## Modules
 
@@ -127,22 +129,46 @@ sudo mv nullwatch /usr/local/bin/
 
 ## Usage
 
-Run it and answer the prompts:
-
 ```bash
 nullwatch
 ```
 
-- **First run:** fill in parameters for AdGuard, WireGuard, and Traefik
-  (domain, VPN subnet, admin credentials, etc.). nullwatch writes `~/.nullwatch/config.yaml`,
-  generates compose files, brings the stack up, and applies wiring.
-- **Later runs:** the same wizard opens with your current values pre-filled.
-  Change a parameter and nullwatch reconciles: `docker compose up -d` is
-  idempotent, so re-running with no changes restarts nothing.
+Every run opens the same menu — the banner and, once you've set up at least
+once, the live URLs for each service, right at the top:
+
+```
+Quick links:
+  AdGuard Home:      http://203.0.113.5:3000
+  WireGuard admin:   http://203.0.113.5:51821
+  CasaOS:            http://203.0.113.5
+
+What do you want to do?
+> Full setup (AdGuard + WireGuard + Traefik + CasaOS)
+  Reconfigure AdGuard
+  Reconfigure WireGuard
+  Reconfigure Traefik
+  Install/check CasaOS
+  Show status & URLs
+  Exit
+```
+
+- **Full setup** — fill in parameters for AdGuard, WireGuard, and Traefik
+  (domain, VPN subnet, admin credentials, etc.), then writes
+  `~/.nullwatch/config.yaml`, generates compose files, brings the stack up,
+  applies wiring, and installs CasaOS if it isn't already there. This is
+  what you pick the first time; picking it again reconfigures everything at
+  once with your current values pre-filled.
+- **Reconfigure AdGuard / WireGuard / Traefik** — edit just that module's
+  parameters and re-applies only that one container. `docker compose up -d`
+  is idempotent, so nothing restarts unless something actually changed.
 - **Manual edits:** `~/.nullwatch/config.yaml` is the source of truth and
   is meant to be hand-editable. Edit it directly, then re-run `nullwatch` —
-  it reconciles against whatever's in the file rather than overwriting your
-  changes.
+  the next action you take reconciles against whatever's in the file rather
+  than overwriting your changes.
+- After any setup or reconfigure action, it prints the same quick links plus
+  next steps (point your domain's DNS at the server, open the right
+  firewall ports, log into AdGuard/WireGuard, add a VPN client) before
+  dropping you back at the menu.
 
 ### On-disk layout
 
@@ -168,12 +194,15 @@ docker compose -f ~/.nullwatch/compose/adguard.yml -p nullwatch-adguard up -d
 ## Repo structure
 
 ```
-cmd/nullwatch/           entrypoint
-internal/wizard/         huh forms — per-module config (adguard/wireguard/traefik are mandatory)
+cmd/nullwatch/           entrypoint — the menu loop
+internal/wizard/         huh forms — full-stack setup and per-module reconfigure
 internal/config/         config.yaml schema, load/save, diff
 internal/modules/        one package per module (adguard, wireguard, traefik)
 internal/compose/        template rendering + docker compose shell-out
 internal/wiring/         cross-module automation (DNS rewrites, DNS push)
-internal/orchestrator/   reconciles desired config against running state
+internal/orchestrator/   applies desired config — full stack or a single module
+internal/casaos/         installs CasaOS via its official script
+internal/status/         computes service URLs shown in the menu
+internal/preflight/      checks/installs docker + compose plugin at startup
 templates/                embedded docker-compose templates
 ```
