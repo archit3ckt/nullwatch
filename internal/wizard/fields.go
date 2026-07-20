@@ -34,6 +34,15 @@ func validatePort(s string) error {
 	return nil
 }
 
+// validateAdGuardPassword matches AdGuard Home's own minimum, so a weak
+// password fails here instead of after the container's already up.
+func validateAdGuardPassword(s string) error {
+	if len(s) < 8 {
+		return fmt.Errorf("must be at least 8 characters (AdGuard's own requirement)")
+	}
+	return nil
+}
+
 func domainGroup(desired *config.Config) *huh.Group {
 	return huh.NewGroup(
 		huh.NewInput().
@@ -65,7 +74,7 @@ func adguardGroup(cfg *config.AdGuardConfig) *huh.Group {
 			Title("AdGuard admin password").
 			Password(true).
 			Value(&cfg.AdminPassword).
-			Validate(requireNonEmpty("admin password")),
+			Validate(validateAdGuardPassword),
 		huh.NewMultiSelect[string]().
 			Title("Blocklists").
 			Description("Tracker/analytics/telemetry lists, not just ad-blocking — this is the DNS-level privacy layer.").
