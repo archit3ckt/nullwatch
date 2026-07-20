@@ -11,11 +11,16 @@ $$ | \$$ |\$$$$$$  |$$$$$$$$\ $$$$$$$$\ $$  /   \$$ |$$ |  $$ |  $$ |   \$$$$$$ 
 
 # nullwatch
 
-An interactive CLI that provisions the infrastructure layer of a self-hosted
-private cloud: **AdGuard Home** (DNS + tracker/ad blocking), **WireGuard**
-(full-tunnel VPN), and **Traefik** (reverse proxy) — wired together
-automatically, on your own VPS, with no third-party accounts, relays, or
-telemetry involved.
+Turn a bare VPS into your own private cloud and internet gateway — so your
+DNS lookups, your VPN traffic, and your data don't have to pass through a
+big tech company's infrastructure to work.
+
+nullwatch is the interactive CLI that provisions the pieces that make that
+possible: **AdGuard Home** (your own DNS resolver, with tracker/ad
+blocklists), **WireGuard** (a full-tunnel VPN — the only way in or out once
+it's set up), and **Traefik** (reverse proxy for whatever you host) — wired
+together automatically, on infrastructure you actually control, with no
+third-party accounts, relays, or telemetry involved.
 
 It's a single static Go binary. No dashboard, no daemon — you run it, answer
 a few prompts, and it exits. Everything it generates (config, compose files)
@@ -42,12 +47,11 @@ third parties. That shapes some concrete defaults:
 
 ## What it does and doesn't do
 
-nullwatch provisions exactly three things — AdGuard, WireGuard, and Traefik —
-as plain Docker Compose services on a Linux host. They're mandatory, not a
-menu: this tool exists specifically to stand up that infrastructure layer,
-so there's no picker asking whether you want DNS or a VPN. What you do
-configure is how they're set up — domain, VPN subnet, admin credentials,
-ports.
+nullwatch provisions three things — AdGuard, WireGuard, and Traefik — as
+plain Docker Compose services on a Linux host. All three are always
+deployed together, since that's the core infrastructure layer this tool
+exists to stand up. What you configure is how they're set up: domain, VPN
+subnet, admin credentials, ports.
 
 Anything beyond that infrastructure layer (Nextcloud, Jellyfin, and every
 other app you'd actually use day to day) is a one-click install away in
@@ -66,8 +70,7 @@ on its dashboard with no explicit integration step needed.
 
 ### Cross-module wiring
 
-Since all three are always present, their wiring is always applied too, no
-conditionals to think about:
+All three modules are wired together automatically:
 
 - **adguard → traefik** — AdGuard gets a wildcard DNS rewrite
   (`*.yourdomain.com` and `yourdomain.com`) pointing at Traefik, registered
@@ -131,8 +134,7 @@ nullwatch
 ```
 
 - **First run:** fill in parameters for AdGuard, WireGuard, and Traefik
-  (domain, VPN subnet, admin credentials, etc.) — all three are enabled by
-  default, no picker involved. nullwatch writes `~/.nullwatch/config.yaml`,
+  (domain, VPN subnet, admin credentials, etc.). nullwatch writes `~/.nullwatch/config.yaml`,
   generates compose files, brings the stack up, and applies wiring.
 - **Later runs:** the same wizard opens with your current values pre-filled.
   Change a parameter and nullwatch reconciles: `docker compose up -d` is
