@@ -92,3 +92,32 @@ func ApplyOne(desired *config.Config, name string) error {
 	}
 	return nil
 }
+
+// Teardown stops and removes every module's containers and compose file,
+// then the shared Docker network. It never touches CasaOS or
+// ~/.nullwatch/config.yaml and data — callers decide separately whether to
+// delete those.
+func Teardown() error {
+	for _, m := range modules.All() {
+		exists, err := compose.Exists(m.Name())
+		if err != nil {
+			return fmt.Errorf("%s: check compose file: %w", m.Name(), err)
+		}
+		if !exists {
+			continue
+		}
+
+		fmt.Printf("==> %s: tearing down\n", m.Name())
+		if err := compose.Down(m.Name()); err != nil {
+			return fmt.Errorf("%s: down: %w", m.Name(), err)
+		}
+		if err := compose.Remove(m.Name()); err != nil {
+			return fmt.Errorf("%s: remove compose file: %w", m.Name(), err)
+		}
+	}
+
+	if err := compose.RemoveNetwork(); err != nil {
+		return fmt.Errorf("remove docker network: %w", err)
+	}
+	return nil
+}

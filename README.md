@@ -149,6 +149,7 @@ What do you want to do?
   Reconfigure Traefik
   Install/check CasaOS
   Show status & URLs
+  Uninstall
   Exit
 ```
 
@@ -161,6 +162,12 @@ What do you want to do?
 - **Reconfigure AdGuard / WireGuard / Traefik** — edit just that module's
   parameters and re-applies only that one container. `docker compose up -d`
   is idempotent, so nothing restarts unless something actually changed.
+- **Uninstall** — a series of separate confirmations, each more destructive
+  than the last, so declining one doesn't cascade into the next: stop and
+  remove the AdGuard/WireGuard/Traefik containers and the shared Docker
+  network; optionally uninstall CasaOS and every app it manages (via its own
+  uninstaller); optionally delete `~/.nullwatch` (config and all persisted
+  data — cannot be undone); optionally remove the `nullwatch` binary itself.
 - **Manual edits:** `~/.nullwatch/config.yaml` is the source of truth and
   is meant to be hand-editable. Edit it directly, then re-run `nullwatch` —
   the next action you take reconciles against whatever's in the file rather

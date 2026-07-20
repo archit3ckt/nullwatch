@@ -56,3 +56,27 @@ func EnsureInstalled() error {
 	}
 	return nil
 }
+
+// Uninstall removes CasaOS and every app it manages, via the
+// casaos-uninstall helper the official installer places on PATH — no
+// network call needed, and it's CasaOS's own removal logic rather than
+// nullwatch reimplementing it. No-ops if CasaOS isn't installed.
+func Uninstall() error {
+	if !Installed() {
+		return nil
+	}
+
+	if _, err := exec.LookPath("casaos-uninstall"); err != nil {
+		return fmt.Errorf("casaos-uninstall script not found on PATH — remove CasaOS manually, see https://casaos.io")
+	}
+
+	fmt.Println("==> uninstalling CasaOS (you may be prompted for your sudo password)")
+	cmd := exec.Command("sudo", "casaos-uninstall")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("casaos-uninstall failed: %w", err)
+	}
+	return nil
+}

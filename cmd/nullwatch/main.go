@@ -62,6 +62,7 @@ func run() error {
 					huh.NewOption("Reconfigure Traefik", "traefik"),
 					huh.NewOption("Install/check CasaOS", "casaos"),
 					huh.NewOption("Show status & URLs", "status"),
+					huh.NewOption("Uninstall", "uninstall"),
 					huh.NewOption("Exit", "exit"),
 				).
 				Value(&choice),
@@ -105,8 +106,105 @@ func run() error {
 			}
 			previous = desired
 			printNextSteps(previous)
+		case "uninstall":
+			updated, err := runUninstall(previous)
+			if err != nil {
+				return err
+			}
+			previous = updated
 		}
 	}
+}
+
+// runUninstall walks through three separate, increasingly destructive
+// confirmations — containers, then config/data, then the binary itself —
+// so declining the first doesn't skip straight past the others.
+func runUninstall(previous *config.Config) (*config.Config, error) {
+	teardown := false
+	if err := huh.NewForm(huh.NewGroup(
+		huh.NewConfirm().
+			Title("Stop and remove AdGuard, WireGuard, and Traefik?").
+			Description("Removes their containers and the shared Docker network. CasaOS and its apps are not touched.").
+			Affirmative("Uninstall").
+			Negative("Cancel").
+			Value(&teardown),
+	)).Run(); err != nil {
+		return previous, fmt.Errorf("uninstall prompt: %w", err)
+	}
+	if !teardown {
+		fmt.Println("Cancelled.")
+		return previous, nil
+	}
+
+	if err := orchestrator.Teardown(); err != nil {
+		return previous, fmt.Errorf("teardown: %w", err)
+	}
+	fmt.Println("==> containers and network removed")
+
+	if casaos.Installed() {
+		removeCasaOS := false
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewConfirm().
+				Title("Also uninstall CasaOS?").
+				Description("Removes CasaOS and every app it manages (Nextcloud, Jellyfin, etc.) via its own uninstaller. Cannot be undone.").
+				Affirmative("Uninstall it").
+				Negative("Keep it").
+				Value(&removeCasaOS),
+		)).Run(); err != nil {
+			return previous, fmt.Errorf("casaos uninstall prompt: %w", err)
+		}
+		if removeCasaOS {
+			if err := casaos.Uninstall(); err != nil {
+				return previous, fmt.Errorf("uninstall casaos: %w", err)
+			}
+			fmt.Println("==> CasaOS removed")
+		}
+	}
+
+	deleteData := false
+	if err := huh.NewForm(huh.NewGroup(
+		huh.NewConfirm().
+			Title("Also delete ~/.nullwatch?").
+			Description("Removes config.yaml and all persisted data — AdGuard settings, WireGuard peer configs, Traefik certs. Cannot be undone.").
+			Affirmative("Delete it").
+			Negative("Keep it").
+			Value(&deleteData),
+	)).Run(); err != nil {
+		return previous, fmt.Errorf("delete data prompt: %w", err)
+	}
+	if deleteData {
+		dir, err := config.BaseDir()
+		if err != nil {
+			return previous, err
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return previous, fmt.Errorf("remove %s: %w", dir, err)
+		}
+		fmt.Printf("==> removed %s\n", dir)
+		previous = config.Default()
+	}
+
+	removeBinary := false
+	if err := huh.NewForm(huh.NewGroup(
+		huh.NewConfirm().
+			Title("Also remove the nullwatch binary itself?").
+			Value(&removeBinary),
+	)).Run(); err != nil {
+		return previous, fmt.Errorf("remove binary prompt: %w", err)
+	}
+	if removeBinary {
+		exe, err := os.Executable()
+		if err != nil {
+			return previous, fmt.Errorf("find nullwatch binary: %w", err)
+		}
+		if err := os.Remove(exe); err != nil {
+			return previous, fmt.Errorf("remove %s: %w", exe, err)
+		}
+		fmt.Printf("==> removed %s. Goodbye.\n", exe)
+		os.Exit(0)
+	}
+
+	return previous, nil
 }
 
 func applyAndSave(previous, desired *config.Config) error {

@@ -40,3 +40,13 @@ func EnsureNetwork() error {
 	}
 	return nil
 }
+
+// RemoveNetwork deletes the shared Docker network. Safe to call even if it
+// doesn't exist (e.g. nothing was ever brought up).
+func RemoveNetwork() error {
+	out, err := exec.Command("docker", "network", "rm", NetworkName).CombinedOutput()
+	if err != nil && !strings.Contains(string(out), "not found") {
+		return fmt.Errorf("docker network rm %s: %w\n%s", NetworkName, err, out)
+	}
+	return nil
+}
