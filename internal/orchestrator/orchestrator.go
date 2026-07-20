@@ -41,6 +41,9 @@ func Apply(previous, desired *config.Config) error {
 		if err := compose.Up(m.Name()); err != nil {
 			return fmt.Errorf("%s: up: %w", m.Name(), err)
 		}
+		if err := m.PostApply(desired); err != nil {
+			return fmt.Errorf("%s: postapply: %w", m.Name(), err)
+		}
 	}
 
 	for _, name := range diff.ToStop {
@@ -85,6 +88,9 @@ func ApplyOne(desired *config.Config, name string) error {
 	}
 	if err := compose.Up(m.Name()); err != nil {
 		return fmt.Errorf("%s: up: %w", m.Name(), err)
+	}
+	if err := m.PostApply(desired); err != nil {
+		return fmt.Errorf("%s: postapply: %w", m.Name(), err)
 	}
 
 	if err := wiring.RegisterDNS(desired); err != nil {

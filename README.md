@@ -68,7 +68,7 @@ no integration step needed.
 
 | Module | Image | Purpose |
 |---|---|---|
-| **adguard** | `adguard/adguardhome` | DNS resolver for the stack, with curated tracker/analytics/ad blocklists. Preseeded on first boot (admin credentials, filters) so it skips AdGuard's interactive setup wizard and its REST API is usable immediately. |
+| **adguard** | `adguard/adguardhome` | DNS resolver for the stack, with curated tracker/analytics/ad blocklists. Configured on first boot via AdGuard's own install API (admin credentials, blocklists) so it skips the interactive setup wizard and its REST API is usable immediately — idempotent, so re-running just confirms it's already configured. |
 | **wireguard** | `ghcr.io/wg-easy/wg-easy` | Full-tunnel WireGuard VPN server with a small web UI for managing peers and generating QR codes / client configs. |
 | **traefik** | `traefik` | Reverse proxy for `*.yourdomain.com`, routing to backend containers via Docker label discovery. Uses its own self-signed TLS cert — see [Security posture](#security-posture) for why there's no Let's Encrypt here. |
 

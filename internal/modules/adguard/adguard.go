@@ -30,9 +30,8 @@ func (a *Adguard) Enabled(cfg *config.Config) bool {
 
 func (a *Adguard) StaticIP() string { return StaticIP }
 
-// PreApply generates AdGuardHome.yaml (admin credentials, DNS settings,
-// blocklists) so the container boots pre-configured instead of requiring
-// AdGuard's interactive first-run setup wizard.
+// PreApply ensures the bind-mount directories exist before the container
+// starts. AdGuard owns everything under them once it boots.
 func (a *Adguard) PreApply(cfg *config.Config) error {
 	if !a.Enabled(cfg) {
 		return nil
@@ -42,30 +41,21 @@ func (a *Adguard) PreApply(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	confDir := filepath.Join(dataDir, "conf")
-	workDir := filepath.Join(dataDir, "work")
-	if err := os.MkdirAll(confDir, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataDir, "conf"), 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(workDir, 0o700); err != nil {
-		return err
-	}
+	return os.MkdirAll(filepath.Join(dataDir, "work"), 0o700)
+}
 
-	confPath := filepath.Join(confDir, "AdGuardHome.yaml")
-	// Only preseed on first setup: once AdGuard has booted it owns this
-	// file (persists filter state, stats, etc.) and we must not clobber it
-	// on every re-run.
-	if _, err := os.Stat(confPath); err == nil {
+// PostApply completes AdGuard's first-run setup and registers the
+// configured blocklists via its own API, once the container is up and
+// reachable. See Client.Bootstrap.
+func (a *Adguard) PostApply(cfg *config.Config) error {
+	if !a.Enabled(cfg) {
 		return nil
-	} else if !os.IsNotExist(err) {
-		return err
 	}
-
-	data, err := generatePreseed(cfg.AdGuard)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(confPath, data, 0o600)
+	client := NewClient(cfg.AdGuard)
+	return client.Bootstrap(cfg.AdGuard.HTTPPort, cfg.AdGuard.DNSPort, cfg.AdGuard.Blocklists)
 }
 
 type templateData struct {

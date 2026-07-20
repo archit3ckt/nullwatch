@@ -24,15 +24,20 @@ type Module interface {
 	// StaticIP is this module's fixed address on compose.NetworkName.
 	StaticIP() string
 
-	// PreApply runs before compose files are rendered, for work like
-	// preseeding a container's own config so it doesn't need an interactive
-	// first-run wizard (e.g. AdGuard's AdGuardHome.yaml). No-op for modules
-	// that don't need it.
+	// PreApply runs before compose files are rendered, for work that needs
+	// to happen before the container starts (e.g. creating bind-mount
+	// directories). No-op for modules that don't need it.
 	PreApply(cfg *config.Config) error
 
 	// WriteCompose renders this module's docker-compose file to
 	// ~/.nullwatch/compose/<name>.yml and returns the path written.
 	WriteCompose(cfg *config.Config) (string, error)
+
+	// PostApply runs after the container is up, for work that needs the
+	// running service reachable (e.g. AdGuard's own install API to finish
+	// first-run setup without an interactive browser wizard). No-op for
+	// modules that don't need it.
+	PostApply(cfg *config.Config) error
 }
 
 // All returns every module in the fixed order they should be applied:

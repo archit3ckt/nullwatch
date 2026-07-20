@@ -52,6 +52,10 @@ func (t *Traefik) PreApply(cfg *config.Config) error {
 	return os.MkdirAll(dynamicDir, 0o700)
 }
 
+// PostApply has nothing to do after the container is up: Traefik needs no
+// first-run API setup.
+func (t *Traefik) PostApply(cfg *config.Config) error { return nil }
+
 type templateData struct {
 	Image            string
 	HTTPPort         int

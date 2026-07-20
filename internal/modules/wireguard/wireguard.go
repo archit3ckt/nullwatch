@@ -35,6 +35,10 @@ func (w *WireGuard) StaticIP() string { return StaticIP }
 // and peer configs on first boot and persists them in its data volume.
 func (w *WireGuard) PreApply(cfg *config.Config) error { return nil }
 
+// PostApply has nothing to do after the container is up: wg-easy's web UI
+// needs no first-run API setup.
+func (w *WireGuard) PostApply(cfg *config.Config) error { return nil }
+
 type templateData struct {
 	Image       string
 	Host        string
