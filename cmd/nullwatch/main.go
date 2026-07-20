@@ -13,6 +13,7 @@ import (
 
 	"github.com/archit3ckt/nullwatch/internal/casaos"
 	"github.com/archit3ckt/nullwatch/internal/config"
+	"github.com/archit3ckt/nullwatch/internal/firewall"
 	"github.com/archit3ckt/nullwatch/internal/orchestrator"
 	"github.com/archit3ckt/nullwatch/internal/preflight"
 	"github.com/archit3ckt/nullwatch/internal/status"
@@ -61,6 +62,7 @@ func run() error {
 					huh.NewOption("Reconfigure WireGuard", "wireguard"),
 					huh.NewOption("Reconfigure Traefik", "traefik"),
 					huh.NewOption("Install/check CasaOS", "casaos"),
+					huh.NewOption("Lock down firewall (VPN-only access)", "firewall"),
 					huh.NewOption("Show status & URLs", "status"),
 					huh.NewOption("Uninstall", "uninstall"),
 					huh.NewOption("Exit", "exit"),
@@ -85,10 +87,17 @@ func run() error {
 			if err := casaos.EnsureInstalled(); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
+			if err := firewall.Apply(desired); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
+			}
 			previous = desired
 			printNextSteps(previous)
 		case "casaos":
 			if err := casaos.EnsureInstalled(); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
+			}
+		case "firewall":
+			if err := firewall.Apply(previous); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
 		case "status":
@@ -235,9 +244,11 @@ func printNextSteps(cfg *config.Config) {
 	fmt.Println("\nDone. Config: ~/.nullwatch/config.yaml, compose files: ~/.nullwatch/compose/")
 	printLinks(cfg)
 	fmt.Println("Next steps:")
-	fmt.Println("  - Point your domain's DNS A record at this server's public IP.")
-	fmt.Println("  - Open ports 80/443 (Traefik) and your WireGuard UDP port in the firewall.")
-	fmt.Println("  - Log into AdGuard and WireGuard above with the credentials you just set.")
-	fmt.Println("  - Add a WireGuard client and confirm its DNS resolves through AdGuard.")
+	fmt.Println("  - If you haven't yet, run \"Lock down firewall\" from the menu — nothing but")
+	fmt.Println("    the WireGuard tunnel should be reachable from the public internet.")
+	fmt.Println("  - Add a WireGuard client, connect to the VPN, and only then log into the")
+	fmt.Println("    URLs above — with the firewall locked down, they won't load otherwise.")
+	fmt.Println("  - Traefik uses a self-signed cert (nothing here is publicly reachable for")
+	fmt.Println("    Let's Encrypt to validate), so your browser will warn once — that's expected.")
 	fmt.Println()
 }

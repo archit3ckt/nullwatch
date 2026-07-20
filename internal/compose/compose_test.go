@@ -33,19 +33,19 @@ func TestRenderAllTemplates(t *testing.T) {
 			"traefik-nodash",
 			"traefik-compose.yml.tmpl",
 			struct {
-				Image, ACMEEmail, DataDir, DynamicDir, NetworkName, StaticIP string
-				HTTPPort, HTTPSPort, DashboardPort                           int
-				DashboardEnabled                                             bool
-			}{"traefik:v3.2", "me@example.com", "/data/traefik", "/data/traefik/dynamic", compose.NetworkName, "172.30.0.3", 80, 443, 8080, false},
+				Image, DynamicDir, NetworkName, StaticIP string
+				HTTPPort, HTTPSPort, DashboardPort       int
+				DashboardEnabled                         bool
+			}{"traefik:v3.2", "/data/traefik/dynamic", compose.NetworkName, "172.30.0.3", 80, 443, 8080, false},
 		},
 		{
 			"traefik-dashboard",
 			"traefik-compose.yml.tmpl",
 			struct {
-				Image, ACMEEmail, DataDir, DynamicDir, NetworkName, StaticIP string
-				HTTPPort, HTTPSPort, DashboardPort                           int
-				DashboardEnabled                                             bool
-			}{"traefik:v3.2", "me@example.com", "/data/traefik", "/data/traefik/dynamic", compose.NetworkName, "172.30.0.3", 80, 443, 8080, true},
+				Image, DynamicDir, NetworkName, StaticIP string
+				HTTPPort, HTTPSPort, DashboardPort       int
+				DashboardEnabled                         bool
+			}{"traefik:v3.2", "/data/traefik/dynamic", compose.NetworkName, "172.30.0.3", 80, 443, 8080, true},
 		},
 	}
 

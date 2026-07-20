@@ -125,10 +125,6 @@ func traefikGroup(cfg *config.TraefikConfig) *huh.Group {
 
 	group := huh.NewGroup(
 		huh.NewInput().
-			Title("ACME email (for Let's Encrypt certs)").
-			Value(&cfg.ACMEEmail).
-			Validate(requireNonEmpty("ACME email")),
-		huh.NewInput().
 			Title("HTTP port").
 			Value(&httpPort).
 			Validate(validatePort),

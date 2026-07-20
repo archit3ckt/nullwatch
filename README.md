@@ -38,9 +38,11 @@ third parties. That shapes some concrete defaults:
   ship with.
 - **AdGuard's blocklists include tracker/analytics/telemetry lists**, not
   just ad-blocking lists — DNS-level blocking is part of the privacy story.
-- **WireGuard is the only way in/out** for client devices once configured,
-  with DNS pushed through AdGuard so lookups can't silently leak to your
-  ISP or a third party.
+- **Nothing but the WireGuard tunnel is exposed to the internet.** AdGuard,
+  Traefik, Traefik's proxied sites, WireGuard's own admin UI, and CasaOS are
+  all firewalled to the VPN subnet and localhost — connect to the VPN first,
+  then everything else. DNS is pushed through AdGuard too, so lookups can't
+  silently leak to your ISP or a third party either.
 - **No component requires a third-party cloud account or hosted control
   plane.** Everything here is fully self-hostable end to end.
 - **Config and compose files stay human-readable** — no obscured state, no
@@ -68,7 +70,7 @@ no integration step needed.
 |---|---|---|
 | **adguard** | `adguard/adguardhome` | DNS resolver for the stack, with curated tracker/analytics/ad blocklists. Preseeded on first boot (admin credentials, filters) so it skips AdGuard's interactive setup wizard and its REST API is usable immediately. |
 | **wireguard** | `ghcr.io/wg-easy/wg-easy` | Full-tunnel WireGuard VPN server with a small web UI for managing peers and generating QR codes / client configs. |
-| **traefik** | `traefik` | Reverse proxy for `*.yourdomain.com`, routing to backend containers via Docker label discovery, with Let's Encrypt handled automatically. |
+| **traefik** | `traefik` | Reverse proxy for `*.yourdomain.com`, routing to backend containers via Docker label discovery. Uses its own self-signed TLS cert — see [Security posture](#security-posture) for why there's no Let's Encrypt here. |
 
 ### Cross-module wiring
 
@@ -84,6 +86,36 @@ All three modules are wired together automatically:
 All three share a fixed Docker network (`nullwatch-net`) with static IPs per
 container, so this wiring doesn't depend on inspecting containers at
 runtime — it's deterministic and works the same on every run.
+
+## Security posture
+
+The only thing meant to be reachable from the public internet is the
+WireGuard tunnel itself. Everything else — AdGuard's UI, WireGuard's own
+admin panel, Traefik (and anything you proxy through it), and CasaOS — is
+firewalled to the WireGuard client subnet and localhost. Connect to the VPN
+first; that's the only door in.
+
+This is enforced at the host level via `ufw`, from the menu's "Lock down
+firewall" action (also offered automatically as part of full setup):
+
+- SSH is allowed from anywhere, always, before anything else is touched —
+  it's the one rule applied first, specifically so a misconfiguration can't
+  lock you out of the box. If you ever can't reach an admin UI, that's what
+  SSH plus `nullwatch` itself are for.
+- The WireGuard UDP port is allowed from anywhere — it has to be, for
+  clients to connect in the first place. WireGuard's protocol silently drops
+  unauthenticated packets rather than responding to them, so it doesn't
+  expand your attack surface the way an open TCP admin port would.
+- Every other managed port (AdGuard, WireGuard's admin UI, Traefik, CasaOS)
+  is only allowed from the WireGuard subnet and `127.0.0.1` — then the
+  default incoming policy is set to deny.
+
+One consequence: since Traefik's ports are never reachable from the public
+internet, Let's Encrypt's HTTP-01 challenge can't complete (it requires port
+80 to be reachable from Let's Encrypt's own servers). Traefik falls back to
+its own self-signed certificate instead — your browser will warn once until
+you trust it, but no ACME flow or third party is involved in getting HTTPS
+working internally.
 
 ## Installation
 
@@ -148,6 +180,7 @@ What do you want to do?
   Reconfigure WireGuard
   Reconfigure Traefik
   Install/check CasaOS
+  Lock down firewall (VPN-only access)
   Show status & URLs
   Uninstall
   Exit
@@ -156,26 +189,31 @@ What do you want to do?
 - **Full setup** — fill in parameters for AdGuard, WireGuard, and Traefik
   (domain, VPN subnet, admin credentials, etc.), then writes
   `~/.nullwatch/config.yaml`, generates compose files, brings the stack up,
-  applies wiring, and installs CasaOS if it isn't already there. This is
-  what you pick the first time; picking it again reconfigures everything at
-  once with your current values pre-filled.
+  applies wiring, installs CasaOS if it isn't already there, and offers to
+  lock down the firewall (see [Security posture](#security-posture)). This
+  is what you pick the first time; picking it again reconfigures everything
+  at once with your current values pre-filled.
 - **Reconfigure AdGuard / WireGuard / Traefik** — edit just that module's
   parameters and re-applies only that one container. `docker compose up -d`
   is idempotent, so nothing restarts unless something actually changed.
+- **Lock down firewall** — re-run the `ufw` lockdown any time on its own,
+  e.g. after changing a port via a reconfigure action. Shows the exact rules
+  before applying and asks for confirmation.
 - **Uninstall** — a series of separate confirmations, each more destructive
   than the last, so declining one doesn't cascade into the next: stop and
   remove the AdGuard/WireGuard/Traefik containers and the shared Docker
   network; optionally uninstall CasaOS and every app it manages (via its own
   uninstaller); optionally delete `~/.nullwatch` (config and all persisted
   data — cannot be undone); optionally remove the `nullwatch` binary itself.
+  It doesn't touch the firewall rules — `ufw disable` if you want those gone
+  too.
 - **Manual edits:** `~/.nullwatch/config.yaml` is the source of truth and
   is meant to be hand-editable. Edit it directly, then re-run `nullwatch` —
   the next action you take reconciles against whatever's in the file rather
   than overwriting your changes.
 - After any setup or reconfigure action, it prints the same quick links plus
-  next steps (point your domain's DNS at the server, open the right
-  firewall ports, log into AdGuard/WireGuard, add a VPN client) before
-  dropping you back at the menu.
+  next steps (connect to the VPN, log into the admin UIs, lock down the
+  firewall if you haven't yet) before dropping you back at the menu.
 
 ### On-disk layout
 
@@ -189,7 +227,7 @@ What do you want to do?
 └── data/
     ├── adguard/           # AdGuardHome.yaml, work dir (persistent)
     ├── wireguard/         # wg-easy keys and peer configs
-    └── traefik/           # acme.json, dynamic file config
+    └── traefik/           # dynamic file config (self-signed TLS, no acme.json)
 ```
 
 Every generated compose file is runnable by hand:
@@ -208,8 +246,9 @@ internal/modules/        one package per module (adguard, wireguard, traefik)
 internal/compose/        template rendering + docker compose shell-out
 internal/wiring/         cross-module automation (DNS rewrites, DNS push)
 internal/orchestrator/   applies desired config — full stack or a single module
-internal/casaos/         installs CasaOS via its official script
+internal/casaos/         installs/uninstalls CasaOS via its official scripts
 internal/status/         computes service URLs shown in the menu
 internal/preflight/      checks/installs docker + compose plugin at startup
+internal/firewall/       locks the host to VPN-only access via ufw
 templates/                embedded docker-compose templates
 ```

@@ -1,6 +1,13 @@
 // Package traefik implements the Module contract for Traefik, the reverse
 // proxy routing *.Domain to backend containers via Docker label discovery,
 // with a file provider directory for static/dynamic routes too.
+//
+// Everything this stack runs is meant to be VPN-only (see internal/firewall)
+// rather than publicly reachable, so there's no way to complete Let's
+// Encrypt's HTTP-01 challenge — port 80 is never reachable from Let's
+// Encrypt's validation servers. Traefik falls back to its own self-signed
+// certificate for TLS instead; browsers will warn once until you trust it,
+// but no ACME/third party is involved.
 package traefik
 
 import (
@@ -31,8 +38,7 @@ func (t *Traefik) Enabled(cfg *config.Config) bool {
 
 func (t *Traefik) StaticIP() string { return StaticIP }
 
-// PreApply ensures the dynamic file-provider directory and acme.json exist.
-// acme.json must be 0600 or Traefik refuses to use it for ACME storage.
+// PreApply ensures the dynamic file-provider directory exists.
 func (t *Traefik) PreApply(cfg *config.Config) error {
 	if !t.Enabled(cfg) {
 		return nil
@@ -43,19 +49,7 @@ func (t *Traefik) PreApply(cfg *config.Config) error {
 		return err
 	}
 	dynamicDir := filepath.Join(dataDir, "dynamic")
-	if err := os.MkdirAll(dynamicDir, 0o700); err != nil {
-		return err
-	}
-
-	acmePath := filepath.Join(dataDir, "acme.json")
-	if _, err := os.Stat(acmePath); os.IsNotExist(err) {
-		if err := os.WriteFile(acmePath, []byte("{}"), 0o600); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-	return os.Chmod(acmePath, 0o600)
+	return os.MkdirAll(dynamicDir, 0o700)
 }
 
 type templateData struct {
@@ -64,8 +58,6 @@ type templateData struct {
 	HTTPSPort        int
 	DashboardEnabled bool
 	DashboardPort    int
-	ACMEEmail        string
-	DataDir          string
 	DynamicDir       string
 	NetworkName      string
 	StaticIP         string
@@ -83,8 +75,6 @@ func (t *Traefik) WriteCompose(cfg *config.Config) (string, error) {
 		HTTPSPort:        cfg.Traefik.HTTPSPort,
 		DashboardEnabled: cfg.Traefik.DashboardEnabled,
 		DashboardPort:    cfg.Traefik.DashboardPort,
-		ACMEEmail:        cfg.Traefik.ACMEEmail,
-		DataDir:          dataDir,
 		DynamicDir:       filepath.Join(dataDir, "dynamic"),
 		NetworkName:      compose.NetworkName,
 		StaticIP:         StaticIP,

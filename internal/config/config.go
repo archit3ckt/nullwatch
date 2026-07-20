@@ -69,13 +69,14 @@ type WireGuardConfig struct {
 }
 
 // TraefikConfig configures Traefik as the reverse proxy for *.Domain,
-// routing to backend containers via Docker label discovery.
+// routing to backend containers via Docker label discovery. TLS uses
+// Traefik's own self-signed cert, not ACME/Let's Encrypt — see
+// internal/firewall for why (nothing here is meant to be internet-reachable
+// for HTTP-01 to complete against).
 type TraefikConfig struct {
 	Enabled bool `yaml:"enabled"`
 
-	ACMEEmail string `yaml:"acme_email"`
-
-	HTTPPort  int `yaml:"http_port"`  // 80, used for ACME HTTP-01 + redirect
+	HTTPPort  int `yaml:"http_port"`  // 80, used for the HTTP->HTTPS redirect
 	HTTPSPort int `yaml:"https_port"` // 443
 
 	DashboardEnabled bool `yaml:"dashboard_enabled"`
