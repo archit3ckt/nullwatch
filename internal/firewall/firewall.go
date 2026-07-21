@@ -135,15 +135,25 @@ func buildInputRules(sshPort, wgPort int, wgSubnet string) []rule {
 // the tunnel port for every other Docker-published port, drop everything
 // else arriving via the public interface. No IPv6 VPN client subnet exists
 // in this setup, so IPv6 only keeps the tunnel port itself open.
+//
+// Also RETURNs already-established/related connections first — this is
+// the full-tunnel VPN's gateway path: a client's own outbound request (say,
+// to a website) leaves fine regardless of this chain, but the response
+// packet arrives back in via the public interface, from the site's IP, not
+// the WireGuard subnet or port. Without this exception it's indistinguishable
+// from unsolicited inbound traffic and gets dropped — silently breaking
+// internet access over the VPN despite the tunnel itself working fine.
 func dockerUserRules(wgPort int, wgSubnet, iface string) []rule {
 	if wgSubnet == "" {
 		return nil
 	}
 	wgPortStr := strconv.Itoa(wgPort)
 	return []rule{
+		{"iptables-nft", "DOCKER-USER", []string{"-i", iface, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "RETURN"}},
 		{"iptables-nft", "DOCKER-USER", []string{"-i", iface, "-s", wgSubnet, "-j", "RETURN"}},
 		{"iptables-nft", "DOCKER-USER", []string{"-i", iface, "-p", "udp", "--dport", wgPortStr, "-j", "RETURN"}},
 		{"iptables-nft", "DOCKER-USER", []string{"-i", iface, "-j", "DROP"}},
+		{"ip6tables-nft", "DOCKER-USER", []string{"-i", iface, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "RETURN"}},
 		{"ip6tables-nft", "DOCKER-USER", []string{"-i", iface, "-p", "udp", "--dport", wgPortStr, "-j", "RETURN"}},
 		{"ip6tables-nft", "DOCKER-USER", []string{"-i", iface, "-j", "DROP"}},
 	}
