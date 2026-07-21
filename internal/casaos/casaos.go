@@ -16,6 +16,18 @@ import (
 // installScriptURL is CasaOS's own official convenience script.
 const installScriptURL = "https://get.casaos.io"
 
+// GatewayIP is compose.NetworkName's Docker-assigned gateway address.
+// CasaOS is a native process, not a container on that network, so it has no
+// static IP of its own the way other modules do — but it listens on every
+// interface the host has, including this one, which is reachable from VPN
+// clients and other containers the same way any other module's static IP
+// is. Not sourced from the compose package directly to avoid a needless
+// import cycle risk (compose doesn't need to know about CasaOS).
+const GatewayIP = "172.30.0.1"
+
+// Port is CasaOS's default web UI port.
+const Port = 81
+
 // Installed reports whether CasaOS's systemd service is present, i.e. its
 // installer has already run on this host.
 func Installed() bool {

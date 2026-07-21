@@ -3,8 +3,10 @@
 // regardless of what's actually running. Rather than allowlisting specific
 // known ports (AdGuard, Traefik, ...), which can never keep up with
 // whatever CasaOS's app store lets you install later, the entire WireGuard
-// subnet is trusted for every port: connect to the VPN, and everything on
-// this host is reachable; don't, and only SSH and the tunnel itself are.
+// client subnet — and, for INPUT, the whole nullwatch-net Docker subnet too
+// (see buildInputRules) — is trusted for every port: connect to the VPN,
+// and everything on this host is reachable; don't, and only SSH and the
+// tunnel itself are.
 //
 // This talks to iptables directly rather than going through ufw. ufw was
 // the first approach here, but it turned out to fail ("ERROR: problem
@@ -60,8 +62,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 
+	"github.com/archit3ckt/nullwatch/internal/compose"
 	"github.com/archit3ckt/nullwatch/internal/config"
-	"github.com/archit3ckt/nullwatch/internal/modules/wireguard"
 )
 
 // detectSSHPort reads a custom Port directive from sshd_config, falling
@@ -135,17 +137,20 @@ func buildInputRules(sshPort, wgPort int, wgSubnet, iface string) []rule {
 		// the tunnel/bridge never arrives via the public interface, so this
 		// excludes nothing legitimate.
 		rule{"iptables-legacy", "INPUT", []string{"!", "-i", iface, "-s", wgSubnet, "-j", "ACCEPT"}},
-		// wg-easy runs as a container, not in host-network mode, so it does its
-		// own internal NAT on client traffic before any packet leaves its own
-		// container — anything reaching the host directly (native processes
-		// like CasaOS, not other containers on nullwatch-net) always has
-		// source wireguard.StaticIP, never the client's literal address in
-		// wgSubnet. Without this, a rule that only trusts wgSubnet is dead
-		// code for anything destined at the host itself (confirmed on a real
-		// deployment: the equivalent DOCKER-USER rule showed 0 matched
-		// packets), and native host services stay unreachable over the VPN
-		// despite "trust the whole VPN subnet" being the intent.
-		rule{"iptables-legacy", "INPUT", []string{"!", "-i", iface, "-s", wireguard.StaticIP, "-j", "ACCEPT"}},
+		// Any container on nullwatch-net (172.30.0.0/24) also needs to reach
+		// native host services (CasaOS; Traefik proxying to it), not just
+		// VPN clients directly. wg-easy runs as a container, not in
+		// host-network mode, so it does its own internal NAT on client
+		// traffic before any packet leaves its own container — anything
+		// reaching the host directly always has a source somewhere in this
+		// subnet (e.g. wg-easy's own 172.30.0.4), never the client's literal
+		// address in wgSubnet. Without this, a rule that only trusts wgSubnet
+		// is dead code for anything destined at the host itself (confirmed on
+		// a real deployment: the equivalent DOCKER-USER rule showed 0 matched
+		// packets). Trusting the whole subnet rather than one static IP at a
+		// time also means a new module never needs its own INPUT rule added
+		// here just to reach a host service.
+		rule{"iptables-legacy", "INPUT", []string{"!", "-i", iface, "-s", compose.NetworkSubnet, "-j", "ACCEPT"}},
 		rule{"iptables-legacy", "INPUT", []string{"-s", "127.0.0.1", "-j", "ACCEPT"}},
 		rule{"ip6tables-legacy", "INPUT", []string{"-p", "udp", "--dport", wgPortStr, "-j", "ACCEPT"}},
 		rule{"ip6tables-legacy", "INPUT", []string{"-s", "::1", "-j", "ACCEPT"}},
@@ -359,12 +364,15 @@ func Apply(cfg *config.Config) error {
 		wgSubnet = cfg.WireGuard.Subnet
 	}
 
-	// Retire pre-"! -i iface" forms of the two subnet-trust rules, if a prior
-	// run applied them — see removeRule's doc comment for why applyRule
-	// alone wouldn't clean these up.
+	// Retire rule forms superseded across this package's evolution, if a
+	// prior run applied them — see removeRule's doc comment for why
+	// applyRule alone wouldn't clean these up. Includes the pre-"! -i iface"
+	// unscoped form, and the earlier design that trusted only wg-easy's own
+	// static IP (172.30.0.4) instead of the whole nullwatch-net subnet.
 	if wgSubnet != "" {
 		removeRule(rule{"iptables-legacy", "INPUT", []string{"-s", wgSubnet, "-j", "ACCEPT"}})
-		removeRule(rule{"iptables-legacy", "INPUT", []string{"-s", wireguard.StaticIP, "-j", "ACCEPT"}})
+		removeRule(rule{"iptables-legacy", "INPUT", []string{"-s", "172.30.0.4", "-j", "ACCEPT"}})
+		removeRule(rule{"iptables-legacy", "INPUT", []string{"!", "-i", iface, "-s", "172.30.0.4", "-j", "ACCEPT"}})
 	}
 
 	inputRules := buildInputRules(sshPort, wgPort, wgSubnet, iface)

@@ -37,6 +37,23 @@ func TestLinksAfterSetup(t *testing.T) {
 	}
 }
 
+func TestLinksCasaOSUsesFriendlyHostnameWhenWired(t *testing.T) {
+	cfg := config.Default()
+	cfg.WireGuard.Host = "203.0.113.5"
+	cfg.Global.Domain = "home.arpa"
+
+	links := status.Links(cfg)
+	for _, l := range links {
+		if l.Name == "CasaOS" {
+			if l.URL != "http://casaos.home.arpa" {
+				t.Errorf("CasaOS = %s, want http://casaos.home.arpa", l.URL)
+			}
+			return
+		}
+	}
+	t.Fatal("no CasaOS link returned")
+}
+
 func TestLinksOmitsDisabledTraefikDashboard(t *testing.T) {
 	cfg := config.Default()
 	cfg.WireGuard.Host = "203.0.113.5"

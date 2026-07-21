@@ -6,6 +6,7 @@ package status
 import (
 	"fmt"
 
+	"github.com/archit3ckt/nullwatch/internal/casaos"
 	"github.com/archit3ckt/nullwatch/internal/config"
 	"github.com/archit3ckt/nullwatch/internal/modules/adguard"
 	"github.com/archit3ckt/nullwatch/internal/modules/traefik"
@@ -35,10 +36,12 @@ type Link struct {
 // CasaOS is a native process, not a container on nullwatch-net, so it has
 // no static IP of its own — but it does listen on all of the host's
 // interfaces, which includes nullwatch-net's own Docker-assigned bridge
-// gateway address. That address is reachable the same way the other
-// services' static IPs are (ordinary routing to a private subnet, no
-// hairpin NAT), so it's used here instead of the public domain.
-const casaosGatewayIP = "172.30.0.1"
+// gateway address (casaos.GatewayIP). That address is reachable the same
+// way the other services' static IPs are (ordinary routing to a private
+// subnet, no hairpin NAT), so it's used as the fallback here instead of the
+// public domain. When AdGuard and Traefik are both enabled and a domain is
+// configured, Traefik's PreApply also writes a casaos.<domain> route (see
+// internal/modules/traefik), so the friendlier hostname is shown instead.
 func Links(cfg *config.Config) []Link {
 	if cfg.WireGuard == nil || cfg.WireGuard.Host == "" {
 		return nil
@@ -54,7 +57,11 @@ func Links(cfg *config.Config) []Link {
 	if cfg.Traefik != nil && cfg.Traefik.Enabled && cfg.Traefik.DashboardEnabled {
 		links = append(links, Link{"Traefik dashboard", fmt.Sprintf("http://%s:%d", traefik.StaticIP, cfg.Traefik.DashboardPort)})
 	}
-	links = append(links, Link{"CasaOS", fmt.Sprintf("http://%s:81", casaosGatewayIP)})
+	if cfg.AdGuard != nil && cfg.AdGuard.Enabled && cfg.Traefik != nil && cfg.Traefik.Enabled && cfg.Global.Domain != "" {
+		links = append(links, Link{"CasaOS", fmt.Sprintf("http://casaos.%s", cfg.Global.Domain)})
+	} else {
+		links = append(links, Link{"CasaOS", fmt.Sprintf("http://%s:%d", casaos.GatewayIP, casaos.Port)})
+	}
 
 	return links
 }
