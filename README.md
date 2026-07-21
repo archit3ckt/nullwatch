@@ -102,11 +102,12 @@ at least once), and the same menu:
 Quick links (only reachable once connected to the VPN):
   AdGuard Home:      http://172.30.0.2:3000
   WireGuard admin:   http://172.30.0.4:51821
-  CasaOS (via public domain — see note below): http://203.0.113.5:81
-  (AdGuard/WireGuard/Traefik use their private container IPs — reachable
-   over the VPN like any other machine on a LAN. CasaOS isn't containerized
-   by nullwatch, so it only has its public address; if that doesn't load over
-   the VPN, your VPS provider's private/internal IP for this box may work instead.)
+  CasaOS:            http://172.30.0.1:81
+  (all four are private addresses on the VPN's own network — reachable over
+   the tunnel like any other machine on a LAN. CasaOS isn't containerized by
+   nullwatch, but it listens on every interface the host has, including
+   nullwatch-net's Docker-assigned gateway address, so it's reached the same
+   way as everything else.)
 
 What do you want to do?
 > Full setup (AdGuard + WireGuard + Traefik + CasaOS)
@@ -150,9 +151,9 @@ SSH is always allowed through the firewall, no matter what — that's by
 design. SSH in and run `nullwatch` again to fix or reconfigure anything.
 
 **How do I add apps like Nextcloud or Jellyfin?**
-Through CasaOS, once you're connected to the VPN, at `http://<your
-server>:81`. That's CasaOS's job — nullwatch just makes sure the
-infrastructure underneath it exists and stays locked down.
+Through CasaOS, once you're connected to the VPN, at `http://172.30.0.1:81`
+(the "Show status & URLs" link). That's CasaOS's job — nullwatch just makes
+sure the infrastructure underneath it exists and stays locked down.
 
 **Why does my browser warn me about an invalid certificate?**
 Traefik uses a self-signed certificate. Nothing here is reachable from the

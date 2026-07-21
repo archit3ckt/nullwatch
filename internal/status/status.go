@@ -32,10 +32,13 @@ type Link struct {
 // guaranteed to work without explicit configuration this stack doesn't set
 // up, since it's not needed for anything else here.
 //
-// CasaOS is the one exception: it's a native process nullwatch doesn't
-// configure or containerize, listening on the host's own public interface,
-// so there's no private address to hand out for it — the public domain is
-// the only address it actually has.
+// CasaOS is a native process, not a container on nullwatch-net, so it has
+// no static IP of its own — but it does listen on all of the host's
+// interfaces, which includes nullwatch-net's own Docker-assigned bridge
+// gateway address. That address is reachable the same way the other
+// services' static IPs are (ordinary routing to a private subnet, no
+// hairpin NAT), so it's used here instead of the public domain.
+const casaosGatewayIP = "172.30.0.1"
 func Links(cfg *config.Config) []Link {
 	if cfg.WireGuard == nil || cfg.WireGuard.Host == "" {
 		return nil
@@ -51,7 +54,7 @@ func Links(cfg *config.Config) []Link {
 	if cfg.Traefik != nil && cfg.Traefik.Enabled && cfg.Traefik.DashboardEnabled {
 		links = append(links, Link{"Traefik dashboard", fmt.Sprintf("http://%s:%d", traefik.StaticIP, cfg.Traefik.DashboardPort)})
 	}
-	links = append(links, Link{"CasaOS (via public domain — see note below)", fmt.Sprintf("http://%s:81", cfg.WireGuard.Host)})
+	links = append(links, Link{"CasaOS", fmt.Sprintf("http://%s:81", casaosGatewayIP)})
 
 	return links
 }

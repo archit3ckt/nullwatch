@@ -61,6 +61,7 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"github.com/archit3ckt/nullwatch/internal/config"
+	"github.com/archit3ckt/nullwatch/internal/modules/wireguard"
 )
 
 // detectSSHPort reads a custom Port directive from sshd_config, falling
@@ -109,7 +110,7 @@ type rule struct {
 	args  []string
 }
 
-func buildInputRules(sshPort, wgPort int, wgSubnet string) []rule {
+func buildInputRules(sshPort, wgPort int, wgSubnet, iface string) []rule {
 	rules := []rule{
 		{"iptables-legacy", "INPUT", []string{"-i", "lo", "-j", "ACCEPT"}},
 		{"iptables-legacy", "INPUT", []string{"-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"}},
@@ -124,7 +125,27 @@ func buildInputRules(sshPort, wgPort int, wgSubnet string) []rule {
 	wgPortStr := strconv.Itoa(wgPort)
 	return append(rules,
 		rule{"iptables-legacy", "INPUT", []string{"-p", "udp", "--dport", wgPortStr, "-j", "ACCEPT"}},
-		rule{"iptables-legacy", "INPUT", []string{"-s", wgSubnet, "-j", "ACCEPT"}},
+		// "! -i iface" on both trust rules below matters, not just belt-and-
+		// suspenders: these match on source IP alone, and both wgSubnet
+		// (10.8.x) and wireguard.StaticIP (172.30.0.4) are private addresses.
+		// Without excluding the public interface, a spoofed packet claiming
+		// one of those source IPs but arriving over the public internet would
+		// match and be accepted — the same class of bypass DOCKER-USER's
+		// "-i eth0" scoping already prevents on that chain. Real traffic from
+		// the tunnel/bridge never arrives via the public interface, so this
+		// excludes nothing legitimate.
+		rule{"iptables-legacy", "INPUT", []string{"!", "-i", iface, "-s", wgSubnet, "-j", "ACCEPT"}},
+		// wg-easy runs as a container, not in host-network mode, so it does its
+		// own internal NAT on client traffic before any packet leaves its own
+		// container — anything reaching the host directly (native processes
+		// like CasaOS, not other containers on nullwatch-net) always has
+		// source wireguard.StaticIP, never the client's literal address in
+		// wgSubnet. Without this, a rule that only trusts wgSubnet is dead
+		// code for anything destined at the host itself (confirmed on a real
+		// deployment: the equivalent DOCKER-USER rule showed 0 matched
+		// packets), and native host services stay unreachable over the VPN
+		// despite "trust the whole VPN subnet" being the intent.
+		rule{"iptables-legacy", "INPUT", []string{"!", "-i", iface, "-s", wireguard.StaticIP, "-j", "ACCEPT"}},
 		rule{"iptables-legacy", "INPUT", []string{"-s", "127.0.0.1", "-j", "ACCEPT"}},
 		rule{"ip6tables-legacy", "INPUT", []string{"-p", "udp", "--dport", wgPortStr, "-j", "ACCEPT"}},
 		rule{"ip6tables-legacy", "INPUT", []string{"-s", "::1", "-j", "ACCEPT"}},
@@ -170,6 +191,17 @@ func dockerUserRules(wgPort int, wgSubnet, iface string) []rule {
 // nothing else is meant to live in it (Docker itself leaves it empty).
 func flushChain(bin, chain string) error {
 	return run(bin, "-F", chain)
+}
+
+// removeRule deletes r if present, ignoring errors — "already absent" is the
+// success case here, not a failure. Used to retire rule forms superseded by
+// a newer, differently-scoped version: applyRule's add-if-missing check only
+// catches exact duplicates, so an old and a new form of "the same" rule with
+// different args (e.g. one gaining "! -i iface") would otherwise sit side by
+// side, leaving whatever gap the new form closes still open via the old one.
+func removeRule(r rule) {
+	delArgs := append([]string{"-D", r.chain}, r.args...)
+	_ = exec.Command("sudo", append([]string{r.bin}, delArgs...)...).Run()
 }
 
 // applyRule adds r if it isn't already present (checked via -C), so
@@ -327,7 +359,15 @@ func Apply(cfg *config.Config) error {
 		wgSubnet = cfg.WireGuard.Subnet
 	}
 
-	inputRules := buildInputRules(sshPort, wgPort, wgSubnet)
+	// Retire pre-"! -i iface" forms of the two subnet-trust rules, if a prior
+	// run applied them — see removeRule's doc comment for why applyRule
+	// alone wouldn't clean these up.
+	if wgSubnet != "" {
+		removeRule(rule{"iptables-legacy", "INPUT", []string{"-s", wgSubnet, "-j", "ACCEPT"}})
+		removeRule(rule{"iptables-legacy", "INPUT", []string{"-s", wireguard.StaticIP, "-j", "ACCEPT"}})
+	}
+
+	inputRules := buildInputRules(sshPort, wgPort, wgSubnet, iface)
 	dockerRules := dockerUserRules(wgPort, wgSubnet, iface)
 
 	fmt.Println("The following will be applied (idempotent — already-present rules are skipped):")

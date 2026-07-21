@@ -25,7 +25,7 @@ func TestLinksAfterSetup(t *testing.T) {
 		"AdGuard Home":      "http://172.30.0.2:3000",
 		"WireGuard admin":   "http://172.30.0.4:51821",
 		"Traefik dashboard": "http://172.30.0.3:8080",
-		"CasaOS (via public domain — see note below)": "http://203.0.113.5:81",
+		"CasaOS":            "http://172.30.0.1:81",
 	}
 	if len(links) != len(want) {
 		t.Fatalf("got %d links, want %d: %+v", len(links), len(want), links)
