@@ -22,10 +22,10 @@ func TestLinksAfterSetup(t *testing.T) {
 	links := status.Links(cfg)
 
 	want := map[string]string{
-		"AdGuard Home":      "http://203.0.113.5:3000",
-		"WireGuard admin":   "http://203.0.113.5:51821",
-		"Traefik dashboard": "http://203.0.113.5:8080",
-		"CasaOS":            "http://203.0.113.5:81",
+		"AdGuard Home":      "http://172.30.0.2:3000",
+		"WireGuard admin":   "http://172.30.0.4:51821",
+		"Traefik dashboard": "http://172.30.0.3:8080",
+		"CasaOS (via public domain — see note below)": "http://203.0.113.5:81",
 	}
 	if len(links) != len(want) {
 		t.Fatalf("got %d links, want %d: %+v", len(links), len(want), links)

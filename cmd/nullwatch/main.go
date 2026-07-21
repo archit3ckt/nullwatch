@@ -310,6 +310,10 @@ func printLinks(cfg *config.Config) {
 	for _, l := range links {
 		fmt.Printf("  %-18s %s\n", l.Name+":", l.URL)
 	}
+	fmt.Println("  (AdGuard/WireGuard/Traefik use their private container IPs — reachable")
+	fmt.Println("   over the VPN like any other machine on a LAN. CasaOS isn't containerized")
+	fmt.Println("   by nullwatch, so it only has its public address; if that doesn't load over")
+	fmt.Println("   the VPN, your VPS provider's private/internal IP for this box may work instead.)")
 	fmt.Println()
 }
 

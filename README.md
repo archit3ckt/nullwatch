@@ -99,9 +99,13 @@ at least once), and the same menu:
 
 ```
 Quick links (only reachable once connected to the VPN):
-  AdGuard Home:      http://203.0.113.5:3000
-  WireGuard admin:   http://203.0.113.5:51821
-  CasaOS:            http://203.0.113.5:81
+  AdGuard Home:      http://172.30.0.2:3000
+  WireGuard admin:   http://172.30.0.4:51821
+  CasaOS (via public domain — see note below): http://203.0.113.5:81
+  (AdGuard/WireGuard/Traefik use their private container IPs — reachable
+   over the VPN like any other machine on a LAN. CasaOS isn't containerized
+   by nullwatch, so it only has its public address; if that doesn't load over
+   the VPN, your VPS provider's private/internal IP for this box may work instead.)
 
 What do you want to do?
 > Full setup (AdGuard + WireGuard + Traefik + CasaOS)
