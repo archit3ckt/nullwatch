@@ -107,6 +107,46 @@ func (c *Client) CompleteInstall(httpPort, dnsPort int) error {
 	}
 }
 
+// defaultUpstreamDNS are plain IP addresses, deliberately not a DoH/DoT
+// hostname. AdGuard's own factory default upstream is a DoH endpoint that
+// needs its own bootstrap DNS servers to resolve first — on at least one
+// real deployment those bootstrap servers were unreachable (timing out over
+// plain UDP, and unreachable entirely over IPv6 since this stack's Docker
+// network isn't configured for IPv6), which broke AdGuard's own outbound
+// DNS resolution entirely, taking blocklist fetching and rewrite lookups
+// down with it. A plain IP upstream has no bootstrap step to fail.
+var defaultUpstreamDNS = []string{"9.9.9.9", "1.1.1.1"}
+
+// SetUpstreamDNS overrides AdGuard's upstream DNS servers. Called as part
+// of Bootstrap so a fresh instance never relies on AdGuard's own DoH-based
+// factory default, which needs bootstrap DNS resolution that isn't
+// guaranteed to work on every network.
+func (c *Client) SetUpstreamDNS(servers []string) error {
+	body, err := json.Marshal(map[string]any{
+		"upstream_dns":  servers,
+		"bootstrap_dns": servers,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/control/dns_config", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth(c.user, c.password)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return unexpectedStatus("set upstream dns", resp)
+	}
+	return nil
+}
+
 type filteringStatus struct {
 	Filters []struct {
 		URL string `json:"url"`
@@ -201,19 +241,23 @@ func (c *Client) EnsureFilters(blocklists []string) error {
 	return nil
 }
 
-// Bootstrap brings a freshly-started AdGuard container to a fully
-// configured, idempotent state: wait for the HTTP server, complete
-// first-run setup if needed, then ensure the configured blocklists are
-// registered. Call this once after `docker compose up` for adguard.
-func (c *Client) Bootstrap(httpPort, dnsPort int, blocklists []string) error {
+// Bootstrap brings a freshly-started AdGuard container to a configured,
+// idempotent state: wait for the HTTP server, then complete first-run setup
+// if needed. Deliberately doesn't register blocklists — that's a separate,
+// much slower step (EnsureFilters) callers should run last, after anything
+// that depends on AdGuard's API responding quickly (like the DNS rewrite
+// AdGuard+Traefik wiring needs) — a slow or stuck blocklist fetch can tie up
+// AdGuard's API entirely, and unrelated calls queued behind it will time out
+// too even though they have nothing to do with blocklists.
+func (c *Client) Bootstrap(httpPort, dnsPort int) error {
 	if err := c.WaitReady(20 * time.Second); err != nil {
 		return fmt.Errorf("wait for adguard: %w", err)
 	}
 	if err := c.CompleteInstall(httpPort, dnsPort); err != nil {
 		return fmt.Errorf("complete install: %w", err)
 	}
-	if err := c.EnsureFilters(blocklists); err != nil {
-		return fmt.Errorf("register blocklists: %w", err)
+	if err := c.SetUpstreamDNS(defaultUpstreamDNS); err != nil {
+		return fmt.Errorf("set upstream dns: %w", err)
 	}
 	return nil
 }

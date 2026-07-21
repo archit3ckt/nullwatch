@@ -47,15 +47,30 @@ func (a *Adguard) PreApply(cfg *config.Config) error {
 	return os.MkdirAll(filepath.Join(dataDir, "work"), 0o700)
 }
 
-// PostApply completes AdGuard's first-run setup and registers the
-// configured blocklists via its own API, once the container is up and
-// reachable. See Client.Bootstrap.
+// PostApply completes AdGuard's first-run setup via its own API, once the
+// container is up and reachable. See Client.Bootstrap. Deliberately doesn't
+// register blocklists here — callers should call RegisterBlocklists
+// separately, and last, after anything else that depends on AdGuard's API
+// (like DNS rewiring) has already happened.
 func (a *Adguard) PostApply(cfg *config.Config) error {
 	if !a.Enabled(cfg) {
 		return nil
 	}
 	client := NewClient(cfg.AdGuard)
-	return client.Bootstrap(cfg.AdGuard.HTTPPort, cfg.AdGuard.DNSPort, cfg.AdGuard.Blocklists)
+	return client.Bootstrap(cfg.AdGuard.HTTPPort, cfg.AdGuard.DNSPort)
+}
+
+// RegisterBlocklists registers the configured blocklist URLs via AdGuard's
+// API. Split out from PostApply and meant to be called last in the overall
+// apply sequence: a slow or stuck fetch here can tie up AdGuard's whole API,
+// so anything that depends on it responding quickly (DNS rewiring) needs to
+// happen first. No-ops if AdGuard isn't enabled.
+func RegisterBlocklists(cfg *config.Config) error {
+	if cfg.AdGuard == nil || !cfg.AdGuard.Enabled {
+		return nil
+	}
+	client := NewClient(cfg.AdGuard)
+	return client.EnsureFilters(cfg.AdGuard.Blocklists)
 }
 
 type templateData struct {

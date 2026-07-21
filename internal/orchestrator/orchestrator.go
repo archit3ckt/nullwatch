@@ -11,6 +11,7 @@ import (
 	"github.com/archit3ckt/nullwatch/internal/compose"
 	"github.com/archit3ckt/nullwatch/internal/config"
 	"github.com/archit3ckt/nullwatch/internal/modules"
+	"github.com/archit3ckt/nullwatch/internal/modules/adguard"
 	"github.com/archit3ckt/nullwatch/internal/wiring"
 )
 
@@ -74,6 +75,13 @@ func Apply(previous, desired *config.Config) error {
 		errs = append(errs, fmt.Sprintf("register DNS wiring: %v", err))
 	}
 
+	// Last, deliberately: a slow or stuck blocklist fetch can tie up
+	// AdGuard's whole API, so anything depending on it (the DNS rewrite
+	// above) needs to already be done before this is even attempted.
+	if err := adguard.RegisterBlocklists(desired); err != nil {
+		errs = append(errs, fmt.Sprintf("register adguard blocklists: %v", err))
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("%d error(s) applying the stack:\n%s", len(errs), strings.Join(errs, "\n"))
 	}
@@ -112,6 +120,13 @@ func ApplyOne(desired *config.Config, name string) error {
 
 	if err := wiring.RegisterDNS(desired); err != nil {
 		return fmt.Errorf("register DNS wiring: %w", err)
+	}
+
+	// Last, deliberately — see the comment in Apply. Non-fatal here too: a
+	// slow blocklist shouldn't undo the fact that this module's already
+	// been successfully applied.
+	if err := adguard.RegisterBlocklists(desired); err != nil {
+		fmt.Printf("==> warning: register adguard blocklists: %v\n", err)
 	}
 	return nil
 }
