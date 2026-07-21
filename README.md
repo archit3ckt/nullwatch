@@ -141,12 +141,21 @@ firewall" action (also offered automatically as part of full setup):
   and the tunnel port, and dropping everything else.
 
 Rules are applied idempotently (checked before adding, so re-running
-doesn't duplicate them) and persisted across reboots via
-`iptables-persistent`/`netfilter-persistent`, installed automatically if
-missing. Skipping the `DOCKER-USER` half and relying on `INPUT`-chain rules
-alone (what `ufw` does by default) would leave every container's published
-port reachable from the internet regardless of what the firewall's status
-output claims — worth knowing if you ever adapt this for your own setup.
+doesn't duplicate them). Persistence needs two different mechanisms too:
+`INPUT` survives a reboot via `iptables-persistent`/`netfilter-persistent`,
+installed automatically if missing; `DOCKER-USER` needs its own systemd
+oneshot unit that reapplies it right after `docker.service` starts, since
+Docker recreates that chain empty on every boot and the standard
+persistence tool can't reach the separate `nft` namespace it lives in.
+`ufw` is also purged (and any of its leftover chains cleaned up) before
+applying anything — confirmed on a real deployment that merely leaving it
+installed, even unused, let its old rules silently coexist with these and
+reset `INPUT`'s policy back to `ACCEPT`.
+
+Skipping the `DOCKER-USER` half and relying on `INPUT`-chain rules alone
+(what `ufw` does by default) would leave every container's published port
+reachable from the internet regardless of what the firewall's status output
+claims — worth knowing if you ever adapt this for your own setup.
 
 One consequence: since Traefik's ports are never reachable from the public
 internet, Let's Encrypt's HTTP-01 challenge can't complete (it requires port
@@ -154,6 +163,20 @@ internet, Let's Encrypt's HTTP-01 challenge can't complete (it requires port
 its own self-signed certificate instead — your browser will warn once until
 you trust it, but no ACME flow or third party is involved in getting HTTPS
 working internally.
+
+### References
+
+The Docker/firewall interaction here isn't a nullwatch-specific quirk —
+these cover the same ground in more depth if you're adapting this for your
+own setup:
+
+- [Docker's own docs on packet filtering and firewalls](https://docs.docker.com/engine/network/packet-filtering-firewalls/) —
+  explains why Docker bypasses host firewalls by default and documents
+  `DOCKER-USER` as the intended override point.
+- [ufw-docker](https://github.com/chaifeng/ufw-docker) — the reference
+  community tool for reconciling `ufw` with Docker; its `DOCKER-USER`
+  technique is what this is built on, adapted here for a "trust the whole
+  VPN subnet" model instead of per-port rules.
 
 ## Installation
 
@@ -207,7 +230,7 @@ Every run opens the same menu — the banner and, once you've set up at least
 once, the live URLs for each service, right at the top:
 
 ```
-Quick links:
+Quick links (only reachable once connected to the VPN):
   AdGuard Home:      http://203.0.113.5:3000
   WireGuard admin:   http://203.0.113.5:51821
   CasaOS:            http://203.0.113.5:81
@@ -218,6 +241,7 @@ What do you want to do?
   Reconfigure WireGuard
   Reconfigure Traefik
   Install/check CasaOS
+  Add WireGuard peer
   Lock down firewall (VPN-only access)
   Show status & URLs
   Uninstall
@@ -234,8 +258,17 @@ What do you want to do?
 - **Reconfigure AdGuard / WireGuard / Traefik** — edit just that module's
   parameters and re-applies only that one container. `docker compose up -d`
   is idempotent, so nothing restarts unless something actually changed.
-- **Lock down firewall** — re-run the `ufw` lockdown any time on its own,
-  e.g. after changing a port via a reconfigure action. Shows the exact rules
+- **Add WireGuard peer** — creates a new client via wg-easy's own API over
+  `localhost`, prints its config plus a scannable QR code, and saves it to
+  `~/.nullwatch/data/wireguard/peers/`. This is the intended way to add
+  clients, not wg-easy's web UI directly: that UI is a Docker-published port
+  like everything else, so once the firewall's locked down it's VPN-only —
+  meaning you'd need a peer to reach it, which is exactly what you don't
+  have yet the first time. Since nullwatch runs on the VPS itself, this talks
+  to wg-easy over `localhost` and never touches the public interface, so it
+  works before you've ever connected to the VPN.
+- **Lock down firewall** — re-run the lockdown any time on its own, e.g.
+  after changing a port via a reconfigure action. Shows the exact rules
   before applying and asks for confirmation.
 - **Uninstall** — a series of separate confirmations, each more destructive
   than the last, so declining one doesn't cascade into the next: stop and
@@ -243,7 +276,8 @@ What do you want to do?
   network; optionally uninstall CasaOS and every app it manages (via its own
   uninstaller); optionally delete `~/.nullwatch` (config and all persisted
   data — cannot be undone); optionally remove the `nullwatch` binary itself.
-  It doesn't touch the firewall rules — `ufw disable` if you want those gone
+  It doesn't touch the firewall rules — `sudo iptables-legacy -P INPUT
+  ACCEPT && sudo ip6tables-legacy -P INPUT ACCEPT` if you want those gone
   too.
 - **Manual edits:** `~/.nullwatch/config.yaml` is the source of truth and
   is meant to be hand-editable. Edit it directly, then re-run `nullwatch` —
@@ -264,7 +298,7 @@ What do you want to do?
 │   └── traefik.yml
 └── data/
     ├── adguard/           # AdGuardHome.yaml, work dir (persistent)
-    ├── wireguard/         # wg-easy keys and peer configs
+    ├── wireguard/         # wg-easy keys; peers/ has each client's saved .conf
     └── traefik/           # dynamic file config (self-signed TLS, no acme.json)
 ```
 

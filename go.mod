@@ -4,6 +4,7 @@ go 1.22
 
 require (
 	github.com/charmbracelet/huh v0.6.0
+	github.com/mdp/qrterminal/v3 v3.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -29,6 +30,8 @@ require (
 	github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/term v0.13.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
+	rsc.io/qr v0.2.0 // indirect
 )

@@ -8,12 +8,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/huh"
+	"github.com/mdp/qrterminal/v3"
 
 	"github.com/archit3ckt/nullwatch/internal/casaos"
 	"github.com/archit3ckt/nullwatch/internal/config"
 	"github.com/archit3ckt/nullwatch/internal/firewall"
+	"github.com/archit3ckt/nullwatch/internal/modules/wireguard"
 	"github.com/archit3ckt/nullwatch/internal/orchestrator"
 	"github.com/archit3ckt/nullwatch/internal/preflight"
 	"github.com/archit3ckt/nullwatch/internal/status"
@@ -62,6 +65,7 @@ func run() error {
 					huh.NewOption("Reconfigure WireGuard", "wireguard"),
 					huh.NewOption("Reconfigure Traefik", "traefik"),
 					huh.NewOption("Install/check CasaOS", "casaos"),
+					huh.NewOption("Add WireGuard peer", "wg-peer"),
 					huh.NewOption("Lock down firewall (VPN-only access)", "firewall"),
 					huh.NewOption("Show status & URLs", "status"),
 					huh.NewOption("Uninstall", "uninstall"),
@@ -106,6 +110,10 @@ func run() error {
 			}
 		case "casaos":
 			if err := casaos.EnsureInstalled(); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
+			}
+		case "wg-peer":
+			if err := addWireGuardPeer(previous); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
 		case "firewall":
@@ -228,6 +236,59 @@ func runUninstall(previous *config.Config) (*config.Config, error) {
 	return previous, nil
 }
 
+// addWireGuardPeer creates a new peer via wg-easy's API over localhost —
+// nullwatch runs on the VPS itself, so this never touches the public
+// interface and structurally never needs the firewall opened, unlike
+// visiting wg-easy's own web UI directly. Prints the config and a
+// scannable QR code, and saves the config to disk.
+func addWireGuardPeer(cfg *config.Config) error {
+	if cfg.WireGuard == nil || !cfg.WireGuard.Enabled {
+		return fmt.Errorf("wireguard isn't enabled — run full setup first")
+	}
+
+	name := ""
+	if err := huh.NewForm(huh.NewGroup(
+		huh.NewInput().
+			Title("Peer name").
+			Description("e.g. \"phone\" or \"laptop\" — used to identify this client in wg-easy.").
+			Value(&name).
+			Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("name is required")
+				}
+				return nil
+			}),
+	)).Run(); err != nil {
+		return fmt.Errorf("peer name prompt: %w", err)
+	}
+
+	client := wireguard.NewClient(cfg.WireGuard)
+	_, conf, err := client.CreatePeer(name)
+	if err != nil {
+		return fmt.Errorf("create wireguard peer: %w", err)
+	}
+
+	dataDir, err := config.DataDir("wireguard")
+	if err != nil {
+		return err
+	}
+	peerDir := filepath.Join(dataDir, "peers")
+	if err := os.MkdirAll(peerDir, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", peerDir, err)
+	}
+	peerPath := filepath.Join(peerDir, name+".conf")
+	if err := os.WriteFile(peerPath, []byte(conf), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", peerPath, err)
+	}
+
+	fmt.Printf("\n==> peer %q created, saved to %s\n\n", name, peerPath)
+	fmt.Println(conf)
+	fmt.Println("Scan this with the WireGuard app:")
+	qrterminal.GenerateHalfBlock(conf, qrterminal.L, os.Stdout)
+	fmt.Println()
+	return nil
+}
+
 func applyAndSave(previous, desired *config.Config) error {
 	if err := config.Save(desired); err != nil {
 		return fmt.Errorf("save config: %w", err)
@@ -245,7 +306,7 @@ func printLinks(cfg *config.Config) {
 		fmt.Println()
 		return
 	}
-	fmt.Println("Quick links:")
+	fmt.Println("Quick links (only reachable once connected to the VPN):")
 	for _, l := range links {
 		fmt.Printf("  %-18s %s\n", l.Name+":", l.URL)
 	}
@@ -257,9 +318,11 @@ func printNextSteps(cfg *config.Config) {
 	printLinks(cfg)
 	fmt.Println("Next steps:")
 	fmt.Println("  - If you haven't yet, run \"Lock down firewall\" from the menu — nothing but")
-	fmt.Println("    the WireGuard tunnel should be reachable from the public internet.")
-	fmt.Println("  - Add a WireGuard client, connect to the VPN, and only then log into the")
-	fmt.Println("    URLs above — with the firewall locked down, they won't load otherwise.")
+	fmt.Println("    the WireGuard tunnel should be reachable from the public internet, including")
+	fmt.Println("    the WireGuard admin UI above (it's a Docker-published port like everything else).")
+	fmt.Println("  - Run \"Add WireGuard peer\" from the menu to create your first client — it talks")
+	fmt.Println("    to wg-easy over localhost, so it works even before you're connected to the VPN.")
+	fmt.Println("    Scan the printed QR code, connect, and only then the URLs above will load.")
 	fmt.Println("  - Traefik uses a self-signed cert (nothing here is publicly reachable for")
 	fmt.Println("    Let's Encrypt to validate), so your browser will warn once — that's expected.")
 	fmt.Println()
