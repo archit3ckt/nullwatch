@@ -59,7 +59,9 @@ func (c *Client) login() error {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	// wg-easy responds 204 (no body) on a successful login, not 200 — the
+	// session cookie is the actual payload.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return unexpectedStatus("wg-easy login", resp)
 	}
 
