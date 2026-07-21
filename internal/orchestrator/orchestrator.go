@@ -6,6 +6,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/archit3ckt/nullwatch/internal/compose"
 	"github.com/archit3ckt/nullwatch/internal/config"
@@ -16,6 +17,12 @@ import (
 // Apply reconciles the running stack to match desired. previous is the
 // last-applied config (nil on first run); it's only used to know which
 // modules to tear down.
+//
+// Every module gets a chance regardless of what happened to an earlier one
+// — one module's setup hiccup (e.g. AdGuard's blocklist registration timing
+// out) must not prevent WireGuard or Traefik from starting at all. Errors
+// are collected and reported together at the end instead of aborting the
+// loop on the first one.
 func Apply(previous, desired *config.Config) error {
 	wiring.PrepareConfig(desired)
 
@@ -24,6 +31,7 @@ func Apply(previous, desired *config.Config) error {
 	}
 
 	diff := config.DiffEnabled(previous, desired)
+	var errs []string
 
 	for _, m := range modules.All() {
 		if !m.Enabled(desired) {
@@ -33,33 +41,42 @@ func Apply(previous, desired *config.Config) error {
 		fmt.Printf("==> %s: applying\n", m.Name())
 
 		if err := m.PreApply(desired); err != nil {
-			return fmt.Errorf("%s: preapply: %w", m.Name(), err)
+			errs = append(errs, fmt.Sprintf("%s: preapply: %v", m.Name(), err))
+			continue
 		}
 		if _, err := m.WriteCompose(desired); err != nil {
-			return fmt.Errorf("%s: write compose: %w", m.Name(), err)
+			errs = append(errs, fmt.Sprintf("%s: write compose: %v", m.Name(), err))
+			continue
 		}
 		if err := compose.Up(m.Name()); err != nil {
-			return fmt.Errorf("%s: up: %w", m.Name(), err)
+			errs = append(errs, fmt.Sprintf("%s: up: %v", m.Name(), err))
+			continue
 		}
 		if err := m.PostApply(desired); err != nil {
-			return fmt.Errorf("%s: postapply: %w", m.Name(), err)
+			// The container is up even though postapply failed — worth
+			// reporting, but not worth skipping the remaining modules over.
+			errs = append(errs, fmt.Sprintf("%s: postapply: %v", m.Name(), err))
 		}
 	}
 
 	for _, name := range diff.ToStop {
 		fmt.Printf("==> %s: disabled, tearing down\n", name)
 		if err := compose.Down(name); err != nil {
-			return fmt.Errorf("%s: down: %w", name, err)
+			errs = append(errs, fmt.Sprintf("%s: down: %v", name, err))
+			continue
 		}
 		if err := compose.Remove(name); err != nil {
-			return fmt.Errorf("%s: remove compose file: %w", name, err)
+			errs = append(errs, fmt.Sprintf("%s: remove compose file: %v", name, err))
 		}
 	}
 
 	if err := wiring.RegisterDNS(desired); err != nil {
-		return fmt.Errorf("register DNS wiring: %w", err)
+		errs = append(errs, fmt.Sprintf("register DNS wiring: %v", err))
 	}
 
+	if len(errs) > 0 {
+		return fmt.Errorf("%d error(s) applying the stack:\n%s", len(errs), strings.Join(errs, "\n"))
+	}
 	return nil
 }
 

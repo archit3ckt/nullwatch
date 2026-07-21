@@ -2,10 +2,12 @@ package adguard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/archit3ckt/nullwatch/internal/config"
@@ -139,14 +141,23 @@ func (c *Client) existingFilterURLs() (map[string]bool, error) {
 	return urls, nil
 }
 
+// addURLTimeout is longer than the client's default: AdGuard downloads and
+// validates a blocklist synchronously before responding to /add_url, and
+// large lists (OISD Big and friends) can take well over 5 seconds on a
+// fresh fetch.
+const addURLTimeout = 90 * time.Second
+
 // EnsureFilters registers each blocklist URL that isn't already present,
-// making it idempotent across repeated runs.
+// making it idempotent across repeated runs. Keeps going if one URL fails
+// (slow/unreachable list) rather than aborting the rest — collects every
+// error and reports them together at the end.
 func (c *Client) EnsureFilters(blocklists []string) error {
 	existing, err := c.existingFilterURLs()
 	if err != nil {
 		return err
 	}
 
+	var errs []string
 	for i, url := range blocklists {
 		if existing[url] {
 			continue
@@ -160,8 +171,10 @@ func (c *Client) EnsureFilters(blocklists []string) error {
 		if err != nil {
 			return err
 		}
-		req, err := http.NewRequest(http.MethodPost, c.baseURL+"/control/filtering/add_url", bytes.NewReader(body))
+		ctx, cancel := context.WithTimeout(context.Background(), addURLTimeout)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/control/filtering/add_url", bytes.NewReader(body))
 		if err != nil {
+			cancel()
 			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -169,14 +182,21 @@ func (c *Client) EnsureFilters(blocklists []string) error {
 
 		resp, err := c.http.Do(req)
 		if err != nil {
-			return err
+			errs = append(errs, fmt.Sprintf("%s: %v", url, err))
+			cancel()
+			continue
 		}
 		if resp.StatusCode != http.StatusOK {
-			err := unexpectedStatus(fmt.Sprintf("add filter %s", url), resp)
+			errs = append(errs, unexpectedStatus(fmt.Sprintf("add filter %s", url), resp).Error())
 			resp.Body.Close()
-			return err
+			cancel()
+			continue
 		}
 		resp.Body.Close()
+		cancel()
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%d blocklist(s) failed to register:\n%s", len(errs), strings.Join(errs, "\n"))
 	}
 	return nil
 }
