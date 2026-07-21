@@ -33,7 +33,9 @@ func TestPreApplyWritesCasaOSRoute(t *testing.T) {
 	for _, want := range []string{
 		"Host(`casaos.home.arpa`)",
 		"Host(`home.arpa`)",
-		"replacement: \"http://casaos.home.arpa${1}\"",
+		"replacement: \"https://casaos.home.arpa${1}\"",
+		"- websecure",
+		"tls: {}",
 		"http://172.30.0.1:81",
 	} {
 		if !strings.Contains(string(data), want) {

@@ -5,23 +5,32 @@
 # The bare domain redirects to casaos.{{.Domain}} rather than serving CasaOS
 # directly, so the browser's address bar always reflects the actual route —
 # useful if the root ever points somewhere else later.
+#
+# Routers live on "websecure" (443), not "web" (80): the "web" entrypoint has
+# a global redirect to "websecure" configured in the compose file, evaluated
+# before any router — a router only on "web" would never actually be
+# reached, since every request lands on "websecure" first. "tls: {}" makes
+# Traefik terminate TLS here with its own self-signed cert (see
+# internal/modules/traefik's package doc for why there's no ACME cert).
 http:
   middlewares:
     casaos-redirect:
       redirectRegex:
-        regex: "^http://[^/]+(.*)"
-        replacement: "http://casaos.{{.Domain}}${1}"
+        regex: "^https?://[^/]+(.*)"
+        replacement: "https://casaos.{{.Domain}}${1}"
         permanent: false
   routers:
     casaos:
       rule: "Host(`casaos.{{.Domain}}`)"
       entryPoints:
-        - web
+        - websecure
+      tls: {}
       service: casaos
     casaos-root:
       rule: "Host(`{{.Domain}}`)"
       entryPoints:
-        - web
+        - websecure
+      tls: {}
       middlewares:
         - casaos-redirect
       service: casaos
