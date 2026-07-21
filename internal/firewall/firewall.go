@@ -159,6 +159,19 @@ func dockerUserRules(wgPort int, wgSubnet, iface string) []rule {
 	}
 }
 
+// flushChain empties a chain so its rules can be rebuilt from scratch in the
+// correct order. DOCKER-USER's rules include a terminal DROP partway through
+// the list (not a chain-level policy) — appending only-missing rules across
+// runs whose rule set changed (e.g. a new exception added after a previous
+// run already applied the DROP) silently lands the new rule after DROP,
+// where it can never be evaluated. Rebuilding from empty every run is the
+// only way to guarantee order regardless of what a prior version applied.
+// Safe to flush: this chain exists solely for nullwatch's own rules, and
+// nothing else is meant to live in it (Docker itself leaves it empty).
+func flushChain(bin, chain string) error {
+	return run(bin, "-F", chain)
+}
+
 // applyRule adds r if it isn't already present (checked via -C), so
 // re-applying is idempotent instead of accumulating duplicates.
 func applyRule(r rule) error {
@@ -351,6 +364,17 @@ func Apply(cfg *config.Config) error {
 	for _, r := range inputRules {
 		if err := applyRule(r); err != nil {
 			return err
+		}
+	}
+
+	// DOCKER-USER is rebuilt from scratch every run — see flushChain's doc
+	// comment for why incremental append-if-missing isn't safe here.
+	if len(dockerRules) > 0 {
+		if err := flushChain("iptables-nft", "DOCKER-USER"); err != nil {
+			return fmt.Errorf("flush DOCKER-USER (iptables-nft): %w", err)
+		}
+		if err := flushChain("ip6tables-nft", "DOCKER-USER"); err != nil {
+			return fmt.Errorf("flush DOCKER-USER (ip6tables-nft): %w", err)
 		}
 	}
 	for _, r := range dockerRules {
