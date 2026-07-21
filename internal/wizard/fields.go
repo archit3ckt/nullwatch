@@ -43,11 +43,21 @@ func validateAdGuardPassword(s string) error {
 	return nil
 }
 
+// defaultDomain is IANA-reserved for private/internal use (RFC 8375) and
+// will never resolve publicly or collide with a real domain. Since
+// Traefik's cert is self-signed and everything here is VPN-only anyway,
+// this domain never needs to be one you actually own — it only needs to
+// mean something to AdGuard's own DNS rewrite for VPN clients.
+const defaultDomain = "home.arpa"
+
 func domainGroup(desired *config.Config) *huh.Group {
+	if desired.Global.Domain == "" {
+		desired.Global.Domain = defaultDomain
+	}
 	return huh.NewGroup(
 		huh.NewInput().
 			Title("Base domain").
-			Description("Traefik will route *.<domain> to backend containers; AdGuard will resolve it to Traefik internally.").
+			Description("Traefik routes *.<domain> to backend containers; AdGuard resolves it internally for VPN clients. Defaults to home.arpa, reserved for exactly this kind of private use — change it only if you specifically want something else.").
 			Value(&desired.Global.Domain).
 			Validate(requireNonEmpty("domain")),
 	)

@@ -47,10 +47,11 @@ setup menu.
 
 From there:
 
-1. Pick **Full setup** and answer the prompts (your domain, a VPN subnet,
-   admin passwords). A couple of minutes later you'll have AdGuard,
-   WireGuard, and Traefik running, plus CasaOS installed as your day-to-day
-   dashboard.
+1. Pick **Full setup** and answer the prompts (a VPN subnet, admin
+   passwords, and a base domain — defaults to `home.arpa`, which is fine to
+   just accept unless you have a real domain you want to use instead). A
+   couple of minutes later you'll have AdGuard, WireGuard, and Traefik
+   running, plus CasaOS installed as your day-to-day dashboard.
 2. Pick **Add WireGuard peer** to create your first VPN client — scan the QR
    code it prints with the [WireGuard app](https://www.wireguard.com/install/)
    and connect.
