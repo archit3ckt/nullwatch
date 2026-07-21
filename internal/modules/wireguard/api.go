@@ -43,6 +43,26 @@ func unexpectedStatus(action string, resp *http.Response) error {
 	return fmt.Errorf("%s: unexpected status %d: %s", action, resp.StatusCode, body)
 }
 
+// WaitReady polls wg-easy's web server until it responds or timeout
+// elapses. Confirmed necessary: calling the API immediately after
+// `docker compose up` can hit the container before its app has finished
+// starting, seen as "connection reset by peer" rather than a clean
+// connection-refused — a plain retry-on-connection-error loop handles both.
+func (c *Client) WaitReady(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := c.http.Get(c.baseURL + "/")
+		if err == nil {
+			resp.Body.Close()
+			return nil
+		}
+		lastErr = err
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("wg-easy not ready after %s: %w", timeout, lastErr)
+}
+
 func (c *Client) login() error {
 	body, err := json.Marshal(map[string]string{"password": c.password})
 	if err != nil {
@@ -95,6 +115,9 @@ type createdClient struct {
 // CreatePeer logs in, creates a new WireGuard peer with the given name, and
 // returns its id and the plaintext .conf file content.
 func (c *Client) CreatePeer(name string) (id string, conf string, err error) {
+	if err := c.WaitReady(20 * time.Second); err != nil {
+		return "", "", fmt.Errorf("wg-easy: %w", err)
+	}
 	if err := c.login(); err != nil {
 		return "", "", fmt.Errorf("wg-easy: %w", err)
 	}

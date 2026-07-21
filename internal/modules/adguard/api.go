@@ -73,8 +73,9 @@ type installRequest struct {
 // CompleteInstall finishes AdGuard's first-run setup via its own install
 // API, so it never falls back to requiring the interactive setup wizard in
 // the browser. Most of AdGuard's /control/* API 404s until this completes.
-// If the instance is already configured (e.g. a later re-run), the install
-// endpoint itself is gone (404), which is treated as success.
+// If the instance is already configured (e.g. a later re-run), this
+// endpoint responds 403 (confirmed against a real running instance —
+// initially assumed 404, which was wrong), treated as success either way.
 func (c *Client) CompleteInstall(httpPort, dnsPort int) error {
 	req := installRequest{Username: c.user, Password: c.password}
 	req.Web.IP = "0.0.0.0"
@@ -100,7 +101,7 @@ func (c *Client) CompleteInstall(httpPort, dnsPort int) error {
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
-	case http.StatusOK, http.StatusNotFound:
+	case http.StatusOK, http.StatusNotFound, http.StatusForbidden:
 		return nil
 	default:
 		return unexpectedStatus("complete install", resp)
