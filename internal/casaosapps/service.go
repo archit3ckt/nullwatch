@@ -29,6 +29,17 @@ func EnsureWatcherService() error {
 		return fmt.Errorf("find nullwatch binary: %w", err)
 	}
 
+	// systemd services start with a minimal environment that doesn't
+	// inherit HOME from anyone's shell — config.Load() (via os.UserHomeDir,
+	// which on Linux just reads $HOME) fails outright without it. Baked in
+	// at install time, captured from the environment this is actually
+	// running in right now (interactively, from the menu), rather than
+	// assumed to be /root.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("determine home directory: %w", err)
+	}
+
 	unit := fmt.Sprintf(`[Unit]
 Description=nullwatch CasaOS app-route watcher
 After=docker.service casaos.service
@@ -36,13 +47,14 @@ Requires=docker.service
 
 [Service]
 Type=simple
+Environment=HOME=%s
 ExecStart=%s --casaos-watch
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`, exe)
+`, home, exe)
 
 	writeCmd := exec.Command("sudo", "tee", watcherUnitPath)
 	writeCmd.Stdin = strings.NewReader(unit)
