@@ -36,8 +36,21 @@ services:
     networks:
       nullwatch-net:
         ipv4_address: {{.StaticIP}}
+      # Also joins Docker's default "bridge" network directly, so it can
+      # reach CasaOS apps (most of which land there via network_mode:
+      # bridge) by their own container IP + internal port. Confirmed on a
+      # real deployment that going through the host's gateway address
+      # instead — the same way CasaOS itself is reached, since that's a
+      # plain native process with no NAT involved — times out for anything
+      # docker-proxy publishes: a container on one bridge reaching a
+      # docker-proxy'd port via another bridge's gateway is a known Docker
+      # hairpin-NAT gap, not something fixable from nullwatch's side.
+      default-bridge:
 
 networks:
   nullwatch-net:
     name: {{.NetworkName}}
+    external: true
+  default-bridge:
+    name: bridge
     external: true
