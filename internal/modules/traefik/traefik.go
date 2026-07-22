@@ -13,7 +13,9 @@ package traefik
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/archit3ckt/nullwatch/internal/casaos"
 	"github.com/archit3ckt/nullwatch/internal/compose"
@@ -27,6 +29,8 @@ const StaticIP = "172.30.0.3"
 const templateName = "traefik-compose.yml.tmpl"
 const casaosDynamicTemplateName = "traefik-dynamic-casaos.yml.tmpl"
 const image = "traefik:v3.2"
+const containerName = "nullwatch-traefik" // matches container_name in traefik-compose.yml.tmpl
+const bridgeNetwork = "bridge"
 
 type Traefik struct{}
 
@@ -76,9 +80,28 @@ func (t *Traefik) PreApply(cfg *config.Config) error {
 	return nil
 }
 
-// PostApply has nothing to do after the container is up: Traefik needs no
-// first-run API setup.
-func (t *Traefik) PostApply(cfg *config.Config) error { return nil }
+// PostApply connects the running container to Docker's default "bridge"
+// network — deliberately not declared in the compose file itself, since
+// compose always tries to register container_name as a network-scoped
+// alias on every network a service joins, and the classic bridge network
+// can't support aliases at all (confirmed on a real deployment: "invalid
+// endpoint settings: network-scoped aliases are only supported for
+// user-defined networks", which `docker compose up` failed outright on). A
+// plain `docker network connect` afterward doesn't go through that alias
+// logic. This is what gives Traefik a direct path to CasaOS apps on the
+// default bridge network (see internal/casaosapps) without hairpin NAT
+// through the host. Idempotent: connecting to a network the container is
+// already on just errors "already exists", which is treated as success.
+func (t *Traefik) PostApply(cfg *config.Config) error {
+	if !t.Enabled(cfg) {
+		return nil
+	}
+	out, err := exec.Command("docker", "network", "connect", bridgeNetwork, containerName).CombinedOutput()
+	if err != nil && !strings.Contains(string(out), "already exists") {
+		return fmt.Errorf("connect %s to %s network: %w\n%s", containerName, bridgeNetwork, err, out)
+	}
+	return nil
+}
 
 type templateData struct {
 	Image            string

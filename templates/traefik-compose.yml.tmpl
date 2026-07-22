@@ -36,21 +36,26 @@ services:
     networks:
       nullwatch-net:
         ipv4_address: {{.StaticIP}}
-      # Also joins Docker's default "bridge" network directly, so it can
-      # reach CasaOS apps (most of which land there via network_mode:
-      # bridge) by their own container IP + internal port. Confirmed on a
-      # real deployment that going through the host's gateway address
-      # instead — the same way CasaOS itself is reached, since that's a
-      # plain native process with no NAT involved — times out for anything
-      # docker-proxy publishes: a container on one bridge reaching a
-      # docker-proxy'd port via another bridge's gateway is a known Docker
-      # hairpin-NAT gap, not something fixable from nullwatch's side.
-      default-bridge:
 
 networks:
   nullwatch-net:
     name: {{.NetworkName}}
     external: true
-  default-bridge:
-    name: bridge
-    external: true
+
+# Traefik is also attached to Docker's default "bridge" network, so it can
+# reach CasaOS apps (most of which land there via network_mode: bridge) by
+# their own container IP + internal port — confirmed on a real deployment
+# that going through the host's gateway address instead (the same way
+# CasaOS itself is reached, since that's a plain native process with no NAT
+# involved) times out for anything docker-proxy publishes: a container on
+# one bridge reaching a docker-proxy'd port via another bridge's gateway is
+# a known Docker hairpin-NAT gap, not fixable from nullwatch's side.
+#
+# That attachment is deliberately NOT declared here in compose's own
+# networks: block — doing so hits a real Docker limitation ("network-scoped
+# aliases are only supported for user-defined networks"), since compose
+# always tries to register container_name as an alias on every network a
+# service joins, and the classic bridge network can't support aliases at
+# all. internal/modules/traefik.PostApply instead runs a plain `docker
+# network connect bridge nullwatch-traefik` after compose brings the
+# container up, which doesn't go through that alias logic.
