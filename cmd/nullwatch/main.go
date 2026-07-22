@@ -14,6 +14,7 @@ import (
 	"github.com/mdp/qrterminal/v3"
 
 	"github.com/archit3ckt/nullwatch/internal/casaos"
+	"github.com/archit3ckt/nullwatch/internal/casaosapps"
 	"github.com/archit3ckt/nullwatch/internal/config"
 	"github.com/archit3ckt/nullwatch/internal/firewall"
 	"github.com/archit3ckt/nullwatch/internal/modules/wireguard"
@@ -35,6 +36,13 @@ $$ | \$$ |\$$$$$$  |$$$$$$$$\ $$$$$$$$\ $$  /   \$$ |$$ |  $$ |  $$ |   \$$$$$$ 
 `
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--casaos-watch" {
+		if err := runCasaOSWatch(); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -100,6 +108,9 @@ func run() error {
 			if err := casaos.EnsureInstalled(); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
+			if err := ensureCasaOSWatcher(previous); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
+			}
 			if err := firewall.Apply(previous); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
@@ -110,6 +121,9 @@ func run() error {
 			}
 		case "casaos":
 			if err := casaos.EnsureInstalled(); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
+			}
+			if err := ensureCasaOSWatcher(previous); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
 		case "wg-peer":
@@ -134,6 +148,11 @@ func run() error {
 				return fmt.Errorf("apply %s: %w", choice, err)
 			}
 			previous = desired
+			if choice == "traefik" {
+				if err := ensureCasaOSWatcher(previous); err != nil {
+					fmt.Fprintln(os.Stderr, "warning:", err)
+				}
+			}
 			printNextSteps(previous)
 		case "uninstall":
 			updated, err := runUninstall(previous)
@@ -289,6 +308,18 @@ func addWireGuardPeer(cfg *config.Config) error {
 	return nil
 }
 
+// ensureCasaOSWatcher enables the automatic CasaOS-app routing service if
+// its preconditions are met, and quietly does nothing otherwise (no
+// domain/Traefik configured yet, or CasaOS not installed — the latter
+// checked inside EnsureWatcherService itself) rather than erroring, since
+// this is a nice-to-have that most menu paths shouldn't block on.
+func ensureCasaOSWatcher(cfg *config.Config) error {
+	if cfg.Traefik == nil || !cfg.Traefik.Enabled || cfg.Global.Domain == "" {
+		return nil
+	}
+	return casaosapps.EnsureWatcherService()
+}
+
 func applyAndSave(previous, desired *config.Config) error {
 	if err := config.Save(desired); err != nil {
 		return fmt.Errorf("save config: %w", err)
@@ -310,10 +341,11 @@ func printLinks(cfg *config.Config) {
 	for _, l := range links {
 		fmt.Printf("  %-18s %s\n", l.Name+":", l.URL)
 	}
-	fmt.Println("  (AdGuard/WireGuard/Traefik use their private container IPs — reachable")
-	fmt.Println("   over the VPN like any other machine on a LAN. CasaOS isn't containerized")
-	fmt.Println("   by nullwatch, so it only has its public address; if that doesn't load over")
-	fmt.Println("   the VPN, your VPS provider's private/internal IP for this box may work instead.)")
+	fmt.Println("  (all private addresses on the VPN's own network — reachable over the tunnel")
+	fmt.Println("   like any other machine on a LAN. CasaOS isn't containerized by nullwatch, but")
+	fmt.Println("   it listens on every interface the host has, including this network's gateway,")
+	fmt.Println("   so it's reached the same way. Apps installed through CasaOS get their own")
+	fmt.Println("   <app>.<domain> URL automatically once the app-route watcher is enabled.)")
 	fmt.Println()
 }
 

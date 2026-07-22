@@ -5,5 +5,5 @@ package templates
 
 import "embed"
 
-//go:embed adguard-compose.yml.tmpl wireguard-compose.yml.tmpl traefik-compose.yml.tmpl traefik-dynamic-casaos.yml.tmpl
+//go:embed adguard-compose.yml.tmpl wireguard-compose.yml.tmpl traefik-compose.yml.tmpl traefik-dynamic-casaos.yml.tmpl traefik-dynamic-app.yml.tmpl
 var FS embed.FS
