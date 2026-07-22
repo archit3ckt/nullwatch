@@ -5,24 +5,21 @@
 // CasaOS's own per-app metadata instead of hand-written.
 //
 // CasaOS stores each installed app's compose file at
-// /var/lib/casaos/apps/<app>/docker-compose.yml, carrying an "x-casaos"
-// extension block CasaOS itself uses to build its own dashboard links
-// (title, and a webui.port_map naming the container's web port). Reading
-// that instead of guessing a hostname from the container name, or a port
-// from `docker ps` output, reuses data CasaOS already curated rather than
-// re-deriving it heuristically.
-//
-// The actual host-published port is looked up from the running container
-// rather than trusted from the compose file's text: CasaOS resolves a
-// ${WEBUI_PORT}-style placeholder to whatever free port it picked at
-// install time to dodge conflicts, so the file alone doesn't reliably say
-// what's actually bound.
+// /var/lib/casaos/apps/<app>/docker-compose.yml, carrying a top-level
+// "x-casaos" extension block CasaOS itself uses to build its own dashboard
+// links: title, scheme, and port_map. Confirmed against a real installed
+// app (qBittorrent) that port_map holds the actual resolved host-published
+// port (e.g. "8181"), not the container's internal port (8080 there) — so
+// CasaOS itself already writes the real, conflict-resolved port back into
+// this file, and reading it directly is both simpler and more reliable than
+// cross-referencing a running container via `docker ps`/`docker port`,
+// which an earlier version of this package did before being checked against
+// a real app's file.
 package casaosapps
 
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -37,28 +34,25 @@ const AppsDir = "/var/lib/casaos/apps"
 // App is one CasaOS app with a discovered web UI, ready to route.
 type App struct {
 	Slug      string // derived from the app's title, used as both the Traefik router/service name and the hostname label
-	TargetURL string // e.g. "http://172.30.0.1:38384"
+	TargetURL string // e.g. "http://172.30.0.1:8181"
 }
 
 type composeFile struct {
-	Services map[string]any `yaml:"services"`
-	XCasaOS  *xCasaOS       `yaml:"x-casaos"`
+	XCasaOS *xCasaOS `yaml:"x-casaos"`
 }
 
 type xCasaOS struct {
-	Title flexString `yaml:"title"`
-	Main  string     `yaml:"main"`
-	WebUI *webUI     `yaml:"webui"`
-}
-
-type webUI struct {
-	Scheme  string `yaml:"scheme"`
-	PortMap string `yaml:"port_map"`
+	Title   flexString `yaml:"title"`
+	Scheme  string     `yaml:"scheme"`
+	PortMap string     `yaml:"port_map"`
 }
 
 // flexString handles x-casaos.title, which CasaOS-AppStore apps write as
 // either a plain string or a map of language codes to strings (e.g.
-// {en_us: "...", zh_cn: "..."}).
+// {custom: "", en_US: "qBittorrent"} — confirmed against a real installed
+// app). en_US is preferred; empty values (like an unset "custom" override)
+// are skipped even as a last-resort fallback, since a blank title is never
+// useful as a hostname.
 type flexString string
 
 func (f *flexString) UnmarshalYAML(node *yaml.Node) error {
@@ -66,16 +60,22 @@ func (f *flexString) UnmarshalYAML(node *yaml.Node) error {
 		*f = flexString(node.Value)
 		return nil
 	}
-	if node.Kind == yaml.MappingNode {
-		var m map[string]string
-		if err := node.Decode(&m); err != nil {
-			return err
-		}
-		if v, ok := m["en_us"]; ok {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	var m map[string]string
+	if err := node.Decode(&m); err != nil {
+		return err
+	}
+	for _, key := range []string{"en_US", "en_us", "custom"} {
+		if v, ok := m[key]; ok && v != "" {
 			*f = flexString(v)
 			return nil
 		}
-		for _, v := range m {
+	}
+	for _, v := range m {
+		if v != "" {
 			*f = flexString(v)
 			return nil
 		}
@@ -84,9 +84,8 @@ func (f *flexString) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // Scan reads every installed CasaOS app's compose file and returns the ones
-// with a discoverable, currently-running web UI. Apps with no x-casaos
-// webui block (background services with nothing to browse to), or whose
-// container isn't currently running, are silently skipped rather than
+// with a discoverable web UI. Apps with no x-casaos.port_map (background
+// services with nothing to browse to) are silently skipped rather than
 // treated as errors — a partial result is more useful here than failing the
 // whole scan over one app.
 func Scan() ([]App, error) {
@@ -111,50 +110,36 @@ func Scan() ([]App, error) {
 	return apps, nil
 }
 
-// parsed is what's extractable from an app's compose file alone, before any
-// live Docker lookup — split out from scanOne so the YAML-handling half is
-// testable without a running CasaOS/Docker environment.
+// parsed is what's extractable from an app's compose file — split out from
+// scanOne so the YAML-handling half is testable without a real CasaOS
+// install on disk.
 type parsed struct {
-	Title         string
-	MainService   string
-	ContainerPort string
-	Scheme        string
+	Title   string
+	Scheme  string
+	PortMap string
 }
 
-// parseComposeFile extracts the x-casaos fields Scan needs. Returns ok=false
-// for anything that isn't a routable web app: no x-casaos.webui block at
-// all (background services with nothing to browse to), or no service to
-// attribute the port to.
+// parseComposeFile extracts the x-casaos fields Scan needs. Returns
+// ok=false for anything with no port_map — not a web app, or a background
+// service with nothing to route to.
 func parseComposeFile(data []byte) (parsed, bool) {
 	var cf composeFile
 	if err := yaml.Unmarshal(data, &cf); err != nil {
 		return parsed{}, false // malformed — skip rather than fail the whole scan
 	}
-	if cf.XCasaOS == nil || cf.XCasaOS.WebUI == nil || cf.XCasaOS.WebUI.PortMap == "" {
+	if cf.XCasaOS == nil || cf.XCasaOS.PortMap == "" {
 		return parsed{}, false
 	}
 
-	mainService := cf.XCasaOS.Main
-	if mainService == "" {
-		for name := range cf.Services {
-			mainService = name
-			break
-		}
-	}
-	if mainService == "" {
-		return parsed{}, false
-	}
-
-	scheme := cf.XCasaOS.WebUI.Scheme
+	scheme := cf.XCasaOS.Scheme
 	if scheme == "" {
 		scheme = "http"
 	}
 
 	return parsed{
-		Title:         string(cf.XCasaOS.Title),
-		MainService:   mainService,
-		ContainerPort: cf.XCasaOS.WebUI.PortMap,
-		Scheme:        scheme,
+		Title:   string(cf.XCasaOS.Title),
+		Scheme:  scheme,
+		PortMap: cf.XCasaOS.PortMap,
 	}, true
 }
 
@@ -170,11 +155,6 @@ func scanOne(appDir string) (App, bool) {
 		return App{}, false
 	}
 
-	hostPort, err := lookupHostPort(appDir, p.MainService, p.ContainerPort)
-	if err != nil {
-		return App{}, false // container not running — nothing to route to yet
-	}
-
 	title := p.Title
 	if title == "" {
 		title = appDir
@@ -182,40 +162,8 @@ func scanOne(appDir string) (App, bool) {
 
 	return App{
 		Slug:      slugify(title),
-		TargetURL: fmt.Sprintf("%s://%s:%s", p.Scheme, casaos.GatewayIP, hostPort),
+		TargetURL: fmt.Sprintf("%s://%s:%s", p.Scheme, casaos.GatewayIP, p.PortMap),
 	}, true
-}
-
-// lookupHostPort finds the host port CasaOS actually bound a running app's
-// web UI container port to. Matched via the standard "docker compose"
-// labels (project working dir + service name) rather than assuming a
-// project-naming convention, since that's derived from something already
-// known for certain — the compose file's own path.
-func lookupHostPort(appDir, service, containerPort string) (string, error) {
-	workingDir := filepath.Join(AppsDir, appDir)
-	out, err := exec.Command("docker", "ps",
-		"--filter", "label=com.docker.compose.project.working_dir="+workingDir,
-		"--filter", "label=com.docker.compose.service="+service,
-		"--format", "{{.ID}}",
-	).Output()
-	if err != nil {
-		return "", fmt.Errorf("docker ps: %w", err)
-	}
-	id := strings.TrimSpace(string(out))
-	if id == "" {
-		return "", fmt.Errorf("no running container for %s/%s", appDir, service)
-	}
-
-	portOut, err := exec.Command("docker", "port", id, containerPort+"/tcp").Output()
-	if err != nil {
-		return "", fmt.Errorf("docker port: %w", err)
-	}
-	line := strings.TrimSpace(strings.SplitN(string(portOut), "\n", 2)[0])
-	idx := strings.LastIndex(line, ":")
-	if idx == -1 {
-		return "", fmt.Errorf("unexpected docker port output: %q", line)
-	}
-	return line[idx+1:], nil
 }
 
 // slugify turns an app title into a hostname-safe, lowercase label.

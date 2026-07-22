@@ -55,11 +55,17 @@ func runCasaOSWatch() error {
 
 	reconcile()
 
+	// No --format: its Go-template fields (Status, Actor, ...) come from
+	// Docker's internal event struct, which has changed shape across
+	// versions — confirmed to break here ("can't evaluate field Status")
+	// on a real deployment. The content of each line is never parsed below
+	// anyway (any event triggers a full reconcile), so the default
+	// plain-text output, guaranteed stable across versions, is all that's
+	// needed.
 	cmd := exec.Command("docker", "events",
 		"--filter", "type=container",
 		"--filter", "event=start",
 		"--filter", "event=die",
-		"--format", "{{.Status}} {{.Actor.Attributes.name}}",
 	)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

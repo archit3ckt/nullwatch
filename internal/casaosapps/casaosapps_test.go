@@ -18,87 +18,105 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-func TestParseComposeFileSimpleTitle(t *testing.T) {
+// TestParseComposeFileRealQBittorrentSchema uses the actual on-disk
+// x-casaos shape from a real CasaOS install (trimmed to the relevant
+// fields) — confirmed to differ from the nested "webui: {port_map, scheme}"
+// shape this package originally assumed from public AppStore examples:
+// port_map/scheme/title live directly under x-casaos, and port_map is
+// already the resolved host-published port (8181), not the container's
+// internal port (8080, visible in the real file's own ports: block).
+func TestParseComposeFileRealQBittorrentSchema(t *testing.T) {
 	data := []byte(`
 services:
-  stable-diffusion-webui:
-    image: example/sdwebui
+  qbittorrent:
+    image: ghcr.io/hotio/qbittorrent:release-5.0.4
+    ports:
+      - target: 8080
+        published: "8181"
+        protocol: tcp
 
 x-casaos:
-  title: Stable Diffusion
-  main: stable-diffusion-webui
-  webui:
-    scheme: http
-    index: /
-    port_map: "7860"
+  main: qbittorrent
+  port_map: "8181"
+  scheme: http
+  title:
+    custom: ""
+    en_US: qBittorrent
 `)
 	p, ok := parseComposeFile(data)
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
-	if p.Title != "Stable Diffusion" || p.MainService != "stable-diffusion-webui" ||
-		p.ContainerPort != "7860" || p.Scheme != "http" {
+	if p.Title != "qBittorrent" {
+		t.Errorf("Title = %q, want %q", p.Title, "qBittorrent")
+	}
+	if p.PortMap != "8181" {
+		t.Errorf("PortMap = %q, want %q (the published port, not the container port 8080)", p.PortMap, "8181")
+	}
+	if p.Scheme != "http" {
+		t.Errorf("Scheme = %q, want %q", p.Scheme, "http")
+	}
+}
+
+func TestParseComposeFileTitlePrefersEnUSOverEmptyCustom(t *testing.T) {
+	// Map iteration order is random in Go — this specifically guards against
+	// picking "custom" (present but blank) over "en_US" nondeterministically.
+	for i := 0; i < 20; i++ {
+		data := []byte(`
+x-casaos:
+  port_map: "8080"
+  title:
+    custom: ""
+    en_US: My App
+`)
+		p, ok := parseComposeFile(data)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if p.Title != "My App" {
+			t.Fatalf("Title = %q, want %q (iteration %d)", p.Title, "My App", i)
+		}
+	}
+}
+
+func TestParseComposeFileSimpleStringTitle(t *testing.T) {
+	data := []byte(`
+x-casaos:
+  title: Stable Diffusion
+  scheme: http
+  port_map: "7860"
+`)
+	p, ok := parseComposeFile(data)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if p.Title != "Stable Diffusion" || p.PortMap != "7860" || p.Scheme != "http" {
 		t.Errorf("got %+v", p)
 	}
 }
 
-func TestParseComposeFileBilingualTitle(t *testing.T) {
+func TestParseComposeFileDefaultsSchemeToHTTP(t *testing.T) {
 	data := []byte(`
-services:
-  app:
-    image: example/app
-
 x-casaos:
-  title:
-    en_us: My App
-    zh_cn: 我的应用
-  main: app
-  webui:
-    port_map: "8080"
+  title: Thing
+  port_map: "9000"
 `)
 	p, ok := parseComposeFile(data)
 	if !ok {
 		t.Fatal("expected ok=true")
-	}
-	if p.Title != "My App" {
-		t.Errorf("Title = %q, want %q", p.Title, "My App")
 	}
 	if p.Scheme != "http" {
 		t.Errorf("Scheme = %q, want default %q", p.Scheme, "http")
 	}
 }
 
-func TestParseComposeFileNoMainFallsBackToOnlyService(t *testing.T) {
+func TestParseComposeFileSkipsAppsWithoutPortMap(t *testing.T) {
 	data := []byte(`
-services:
-  onlyservice:
-    image: example/thing
-
-x-casaos:
-  title: Thing
-  webui:
-    port_map: "9000"
-`)
-	p, ok := parseComposeFile(data)
-	if !ok {
-		t.Fatal("expected ok=true")
-	}
-	if p.MainService != "onlyservice" {
-		t.Errorf("MainService = %q, want %q", p.MainService, "onlyservice")
-	}
-}
-
-func TestParseComposeFileSkipsAppsWithoutWebUI(t *testing.T) {
-	data := []byte(`
-services:
-  worker:
-    image: example/worker
-
 x-casaos:
   title: Background Worker
 `)
 	if _, ok := parseComposeFile(data); ok {
-		t.Error("expected ok=false for an app with no x-casaos.webui block")
+		t.Error("expected ok=false for an app with no x-casaos.port_map")
 	}
 }
 
